@@ -20,6 +20,8 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+static struct list sleep_list;
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -37,6 +39,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init(&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -90,10 +93,16 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
+  struct thread* t = thread_current();
+  enum intr_level old_level;
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  old_level = intr_disable ();
+  t->wake_tick = start + ticks;
+  list_insert_ordered (&sleep_list, &t->elem, tick_less, NULL);
+  thread_block();
+  intr_set_level (old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -170,8 +179,26 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  enum intr_level old_level;
   ticks++;
-  thread_tick ();
+  
+  if (thread_mlfqs) {
+    old_level = intr_disable();
+    thread_update_recent_cpu();
+ 
+    if (ticks % TIMER_FREQ == 0) {
+      thread_compute_load_avg();
+      thread_compute_recent_cpu_all();
+    }
+
+    if (ticks % TIME_SLICE == 0) {
+      thread_compute_priority_all();
+    }
+
+    intr_set_level(old_level);
+  }
+  timer_wake();
+  thread_tick();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -243,4 +270,32 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+void 
+timer_wake ()
+{
+    int64_t current = timer_ticks();
+    enum intr_level old_level;
+    struct thread *target = NULL;
+
+    old_level = intr_disable ();
+    while (!list_empty(&sleep_list) &&
+        current >= list_entry(list_front(&sleep_list), struct thread, elem)->wake_tick)
+    {
+        target = list_entry(list_pop_front(&sleep_list), struct thread, elem);
+        target->wake_tick = -1;
+        thread_unblock(target);
+    }
+    intr_set_level (old_level);
+}
+
+/* Returns true if thread A's wake_tick is less than thread B's wake_tick, false
+   otherwise. */
+bool tick_less(const struct list_elem* a_, const struct list_elem* b_, void* aux UNUSED)
+{
+    const struct thread* a = list_entry(a_, struct thread, elem);
+    const struct thread* b = list_entry(b_, struct thread, elem);
+
+    return a->wake_tick < b->wake_tick;
 }

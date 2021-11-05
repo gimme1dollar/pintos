@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,9 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Scheduling. */
+#define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 
 /* A kernel thread or user process.
 
@@ -88,10 +92,19 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int initial_priority;
+    int nice;
+    int recent_cpu;
+    int64_t wake_tick;
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    struct list donations_list;
+
+    struct thread* parent;
+    struct lock* acquiring_target_lock;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -106,6 +119,13 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+struct donation_elem
+{
+    struct list_elem elem;              /* List element. */
+    struct lock* lock_id;
+    int donated_priority;
+};
 
 void thread_init (void);
 void thread_start (void);
@@ -130,12 +150,25 @@ void thread_yield (void);
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
 
+/* Priority scheduling */
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_update_priority(struct thread* t);
+void thread_donate_priority(struct thread* t, struct lock *lock);
+void thread_remove_donation(struct thread* t, struct lock *lock);
 
+/* Advanced priority scheduling */
 int thread_get_nice (void);
-void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void thread_set_nice (int nice);
+void thread_update_recent_cpu(void);
+void thread_compute_recent_cpu(struct thread* t);
+void thread_compute_recent_cpu_all(void);
+void thread_compute_load_avg(void);
+void thread_compute_priority(struct thread* t);
+void thread_compute_priority_all(void);
 
+bool priority_less(const struct list_elem* a_, const struct list_elem* b_, void* aux);
 #endif /* threads/thread.h */
+

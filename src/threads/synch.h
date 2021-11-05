@@ -40,6 +40,7 @@ void cond_init (struct condition *);
 void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
+bool semaphore_less(const struct list_elem* a_, const struct list_elem* b_, void* aux);
 
 /* Optimization barrier.
 
