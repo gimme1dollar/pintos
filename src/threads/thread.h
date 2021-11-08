@@ -101,10 +101,15 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    /* project 1 */
     struct list donations_list;
 
     struct thread* parent;
     struct lock* acquiring_target_lock;
+
+    /* project 2 */
+    struct list child_list;
+    struct child_elem *child_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -125,6 +130,15 @@ struct donation_elem
     struct list_elem elem;              /* List element. */
     struct lock* lock_id;
     int donated_priority;
+};
+
+struct child_elem
+{
+   struct list_elem elem;         
+   
+   tid_t tid;
+   int exit_code;
+   struct semaphore wait_sema;
 };
 
 void thread_init (void);
