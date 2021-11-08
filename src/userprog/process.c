@@ -115,14 +115,21 @@ start_process (void *arg)
   {
     argument_passing (args, count, &if_.esp);
     //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+
+    struct child_elem *ce = malloc (sizeof(struct child_elem));
+    ce->exit_code = -1;
+    sema_init (&ce->wait_sema, 0);
+    ce->tid = thread_current()->tid;
+    thread_current()->child_elem = ce;
+    list_push_back (&parent->child_list, &ce->elem);
+
+    sema_up (parent->load_sema);
   }
   else /* If load failed, quit. */
   {
     sema_up (parent->load_sema);
     thread_exit ();
   }
-
-  sema_up (parent->load_sema);
 
   palloc_free_page (file_name);
   palloc_free_page (args);
@@ -213,7 +220,7 @@ process_wait (tid_t child_tid)
         exit_code = ce->exit_code;
 
         // remove child from child_list
-        list_remove (&ce->elem);
+        list_remove (&(ce->elem));
         free (ce);
 
         return exit_code;

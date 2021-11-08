@@ -294,11 +294,11 @@ thread_exit (void)
   t = thread_current ();
 
 #ifdef USERPROG
-  printf("userprog thread_exit\n");
+  //printf("userprog thread_exit\n");
 
   if (t->child_elem != NULL)
   {
-    printf("sema_up in thread_exit of tid %d\n", thread_current () -> tid);
+    //printf("sema_up in thread_exit of tid %d\n", thread_current () -> tid);
     sema_up (&(t->child_elem->wait_sema));
   }
 

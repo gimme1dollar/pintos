@@ -17,9 +17,15 @@ void sys_halt(void);
 void sys_exit(int , struct intr_frame *);
 void sys_exec(void *, struct intr_frame *);
 void sys_wait(int , struct intr_frame *);
-int sys_read(int fd, void *buffer, unsigned int size);
-int sys_write(int fd, void *buffer, unsigned int size);
-
+void sys_create(char *, size_t, struct intr_frame *);
+void sys_remove(char *, struct intr_frame*);
+void sys_open(char *, struct intr_frame *);
+void sys_filesize(int , struct intr_frame*);
+void sys_read(int , void *, unsigned int , struct intr_frame *);
+void sys_write(int , void *, unsigned int, struct intr_frame *);
+void sys_seek(int, int, struct intr_frame * UNUSED);
+void sys_tell(int , struct intr_frame *f);
+void sys_close(int , struct intr_frame * UNUSED);
 
 struct lock syscall_handler_lock;
 
@@ -81,13 +87,13 @@ syscall_handler (struct intr_frame *f)
   // read memory
   read_mem (&syscall_number, esp, sizeof(int));
 
-  //printf ("%d system call!\n", syscall_number);
+  //printf ("system call with syscall_number %d\n", syscall_number);
 
   // actions
   switch(syscall_number) {
     case SYS_HALT:
     {
-      sys_halt ();
+      sys_halt (); // 
       break;
     }
     case SYS_EXIT:
@@ -103,7 +109,7 @@ syscall_handler (struct intr_frame *f)
       void *cmd;
       read_mem (&cmd, esp+4, sizeof(void *));
 
-      sys_exec (cmd,f);
+      sys_exec (cmd, f);
       break;
     }
     case SYS_WAIT:
@@ -115,7 +121,15 @@ syscall_handler (struct intr_frame *f)
       break;
     }
     case SYS_CREATE:
+    {
+      char * name;
+      size_t size;
+      read_mem(&name, esp+4, sizeof(name));
+      read_mem(&size, esp+8, sizeof(size));
+
+      sys_create(name, size, f);
       break;
+    }
     case SYS_REMOVE:
       break;
     case SYS_OPEN:
@@ -127,10 +141,11 @@ syscall_handler (struct intr_frame *f)
       int fd;
       void *buffer;
       unsigned int size;
-
       read_mem(&fd, esp+4, sizeof(int));
       read_mem(&buffer, esp+8, sizeof(void *));
       read_mem(&size, esp+12, sizeof(unsigned int));
+
+      sys_read(fd, buffer, size, f);
       break;
     }
     case SYS_WRITE:
@@ -142,7 +157,7 @@ syscall_handler (struct intr_frame *f)
       read_mem(&fd, esp+4, sizeof(int));
       read_mem(&buffer, esp+8, sizeof(void *));
       read_mem(&size, esp+12, sizeof(unsigned int));
-      sys_write(fd, buffer, size);
+      sys_write(fd, buffer, size, f);
       break;
     }
     case SYS_SEEK:
@@ -206,22 +221,48 @@ sys_wait(int tid, struct intr_frame *f)
   return;
 }
 
-int
-sys_read(int fd, void *buffer, unsigned int size)
+void
+sys_create(char *name, size_t size, struct intr_frame *f)
 {
-  return 0;
+  check_mem (name);
+
+  lock_acquire(&syscall_handler_lock);
+  f->eax = filesys_create((const char*)name,size);
+  lock_release(&syscall_handler_lock);
 }
 
-int
-sys_write(int fd, void *buffer, unsigned int size)
+void
+sys_read(int fd, void *buffer, unsigned int size, struct intr_frame *f)
+{
+  return;
+}
+
+void
+sys_write(int fd, void *buffer, unsigned int size, struct intr_frame *f)
 {
   //printf("sys_write\n");
+  if(buffer == NULL) 
+    sys_exit(-1,NULL);
 
-  /* write to console */
-  if (fd == 1)
-  {
-    putbuf(buffer, size);
-    return size;
+  lock_acquire(&syscall_handler_lock);
+  switch(fd) {
+    case 0: //stdin
+    {
+      f->eax=-1;
+      break;
+    }
+    case 1: //stdout
+    {
+      putbuf(buffer, size);
+      f->eax=size;
+      break;
+    }
+    default: //filedescriptor
+    {
+      break;
+    }
   }
-  return -1;
+  lock_release(&syscall_handler_lock);
+
+  return;
 }
