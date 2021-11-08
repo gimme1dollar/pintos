@@ -292,13 +292,17 @@ thread_exit (void)
   ASSERT (!intr_context ());
 
   t = thread_current ();
-  
+
 #ifdef USERPROG
-  process_exit ();
-  
-  /* check parent */
+  printf("userprog thread_exit\n");
+
   if (t->child_elem != NULL)
+  {
+    printf("sema_up in thread_exit of tid %d\n", thread_current () -> tid);
     sema_up (&(t->child_elem->wait_sema));
+  }
+
+  process_exit ();
 #endif
 
   /* Remove thread from all threads list, set our status to dying,

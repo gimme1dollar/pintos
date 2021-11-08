@@ -26,7 +26,7 @@ struct lock syscall_handler_lock;
 bool
 check_mem (void *addr)
 {
-  return addr != NULL || is_user_vaddr(addr);
+  return addr != NULL && is_user_vaddr(addr);
 }
 
 /* Reads a byte at user virtual address UADDR.
@@ -78,10 +78,10 @@ syscall_handler (struct intr_frame *f)
   int syscall_number;
   void *esp = f->esp;
 
-  //printf ("system call!\n");
-
   // read memory
   read_mem (&syscall_number, esp, sizeof(int));
+
+  //printf ("%d system call!\n", syscall_number);
 
   // actions
   switch(syscall_number) {
@@ -165,8 +165,9 @@ sys_halt (void)
 void
 sys_exit (int exit_code, struct intr_frame *f UNUSED)
 {
+  //printf("sys_exit\n");
   struct thread *cur;
-  
+
   cur = thread_current();
   if (cur->child_elem != NULL)
     cur->child_elem->exit_code = exit_code;
@@ -180,7 +181,8 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
 void
 sys_exec (void *cmd, struct intr_frame *f)
 {
-  int ret; 
+  //printf("sys_exec\n");
+  int ret;
 
   check_mem (cmd);
 
@@ -192,11 +194,12 @@ sys_exec (void *cmd, struct intr_frame *f)
   return;
 }
 
-void 
+void
 sys_wait(int tid, struct intr_frame *f)
 {
+  //printf("sys_wait\n");
   int ret;
-  
+
   ret = process_wait(tid);
   f->eax = ret;
 
@@ -212,6 +215,9 @@ sys_read(int fd, void *buffer, unsigned int size)
 int
 sys_write(int fd, void *buffer, unsigned int size)
 {
+  //printf("sys_write\n");
+
+  /* write to console */
   if (fd == 1)
   {
     putbuf(buffer, size);

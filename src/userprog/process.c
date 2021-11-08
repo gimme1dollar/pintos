@@ -21,12 +21,12 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void argument_passing (char **args, int count, void **esp);
-
-struct loading_args
+struct thread_arg 
 {
-  char *file_name_;
-  struct semaphore *process_sema;
+  char *file_name;
+  struct thread *parent;
 };
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -35,66 +35,73 @@ struct loading_args
 tid_t
 process_execute (const char *file_name)
 {
+  struct thread *cur;
   char *fn_copy;
   tid_t tid;
   char *token, *save_ptr;
-  struct loading_args *args;
-  struct semaphore process_sema;
-
+  struct thread_arg *arg;
+  
+  /* semaphore for loading child process */
+  cur = thread_current ();
+  cur->load_sema = (struct semaphore *) malloc (sizeof (struct semaphore));
+  sema_init (cur->load_sema, 0);
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
+  {
+    free (cur->load_sema);
     return TID_ERROR;
+  }
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  token = strtok_r (file_name, " ", &save_ptr);
-
   /* build argument for start_process */
-  args = (struct loaindg_args *)malloc(sizeof(struct loading_args));
-  sema_init (&process_sema, 0);
-  args->file_name_ = fn_copy;
-  args->process_sema = &process_sema;
+  arg = (struct thread_arg *) malloc (sizeof(struct thread_arg));
+  arg->file_name = fn_copy;
+  arg->parent = cur;
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (token, PRI_DEFAULT, start_process, args);
+  token = strtok_r (file_name, " ", &save_ptr);
+  tid = thread_create (token, PRI_DEFAULT, start_process, arg);
+
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
-  else 
-    sema_down (&process_sema);
+  else
+    sema_down(cur->load_sema);
 
+  free(cur->load_sema);
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
+
 static void
 start_process (void *arg)
 {
+  struct thread *parent;
   char *file_name;
-  struct semaphore *process_sema;
+
   char **args;
   struct intr_frame if_;
   bool success;
-
   char *token, *save_ptr;
-  int argc = 0;
+  int count = 0;
 
-  struct thread *cur;
-  struct child_elem *ce;
+  /* parse thread_arg */
+  parent = ((struct thread_arg *)arg)->parent;
+  file_name = ((struct thread_arg *)arg)->file_name;
 
-  file_name = ((struct loading_args *)arg)->file_name_;
-  process_sema = ((struct loading_args *)arg)->process_sema;
-
+  /* parse arguments list of the userprogram */
   args = palloc_get_page (0);
   if (args == NULL)
     return TID_ERROR;
 
   for(token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
   {
-    args[argc] = token;
-    argc++;
+    args[count] = token;
+    count++;
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -102,36 +109,25 @@ start_process (void *arg)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  //success = load (file_name, &if_.eip, &if_.esp);
   success = load (args[0], &if_.eip, &if_.esp);
 
-  if (success) 
+  if(success)
   {
-    /* initialize child_elem */
-    cur = thread_current ();
-    ce = malloc (sizeof(struct child_elem));
-    ce->tid = cur->tid;
-    ce->exit_code = -1;
-    sema_init (&ce->wait_sema, 0);
-    list_push_back (&cur->child_list, &ce->elem);
-    printf("child_list length %d of tid %d\n", list_size (&cur->child_list), thread_current() -> tid);
-
-    /* set up the stack */
-    printf("argument_passing\n");
-    argument_passing (args, argc, &if_.esp); 
-    sema_up (process_sema);
-    printf("sema_up\n");
+    argument_passing (args, count, &if_.esp);
+    //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  }
+  else /* If load failed, quit. */
+  {
+    sema_up (parent->load_sema);
+    thread_exit ();
   }
 
-  /* If load failed, quit. */
+  sema_up (parent->load_sema);
+
   palloc_free_page (file_name);
   palloc_free_page (args);
-  if (!success)
-    sema_up (process_sema);
-    thread_exit ();
-  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
-
-
+  free (arg);
+  
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -145,11 +141,11 @@ start_process (void *arg)
 /* Stack arguemtns
    */
 static void
-argument_passing (char **args, int argc, void **esp)
+argument_passing (char **args, int count, void **esp)
 {
   char* address[100];
   int i, j, total = 0, word_align;
-  for(i = argc - 1; i >= 0; i--)
+  for(i = count - 1; i >= 0; i--)
   {
     for(j = strlen(args[i]); j >= 0; j--)
     {
@@ -167,7 +163,7 @@ argument_passing (char **args, int argc, void **esp)
   *esp = *esp - sizeof(char*);
   memset(*esp, 0, sizeof(char*));
 
-  for(i = argc - 1; i >= 0; i--)
+  for(i = count - 1; i >= 0; i--)
   {
     *esp = *esp - sizeof(char*);
     memcpy(*esp, &address[i], sizeof(char*));
@@ -175,7 +171,7 @@ argument_passing (char **args, int argc, void **esp)
   *esp = *esp - sizeof(char**);
   **(int **)esp = (int)(*esp + sizeof(char**));
   *esp = *esp - sizeof(int);
-  **(int **)esp = argc;
+  **(int **)esp = count;
   *esp = *esp - sizeof(void*);
   **(int **)esp = 0;
 }
@@ -192,10 +188,10 @@ argument_passing (char **args, int argc, void **esp)
 int
 process_wait (tid_t child_tid)
 {
-  printf("in process_wait\n");
+  //printf("in process_wait of tid %d\n", thread_current () -> tid);
 
   int exit_code;
-  struct list *child_list; 
+  struct list *child_list;
   struct child_elem *ce;
   struct list_elem *le;
   int count = 0;
@@ -203,15 +199,15 @@ process_wait (tid_t child_tid)
   /* find child with same child_tid */
   child_list = &(thread_current ()->child_list);
 
-  printf("child_list length %d of tid %d\n", list_size (child_list), thread_current() -> tid);
+  //printf("child_list length %d of tid %d\n", list_size (child_list), thread_current() -> tid);
   if (!list_empty (child_list)) {
     for (le = list_front(child_list); le != list_end(child_list); le = list_next(le)) {
-      printf("%d\n", count++);
-
       ce = list_entry (le, struct child_elem, elem);
-      if(ce->tid == child_tid) { 
+      if(ce->tid == child_tid) {
         // wait for child to be exited (sema_up will be executed in thread_exit)
+        //printf("sema_down in process_wait for child_tid %d\n", child_tid);
         sema_down (&ce->wait_sema);
+        //printf("after sema_down child_tid %d\n", child_tid);
 
         // get exit_code
         exit_code = ce->exit_code;
@@ -223,8 +219,8 @@ process_wait (tid_t child_tid)
         return exit_code;
       }
     }
-  } 
-
+  }
+  
   return -1;
 }
 

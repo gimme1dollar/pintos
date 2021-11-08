@@ -108,6 +108,7 @@ struct thread
     struct lock* acquiring_target_lock;
 
     /* project 2 */
+    struct semaphore *load_sema;
     struct list child_list;
     struct child_elem *child_elem;
 
@@ -128,6 +129,7 @@ extern bool thread_mlfqs;
 struct donation_elem
 {
     struct list_elem elem;              /* List element. */
+    
     struct lock* lock_id;
     int donated_priority;
 };
