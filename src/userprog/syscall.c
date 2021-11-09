@@ -226,7 +226,7 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
   if (cur->child_elem != NULL)
     cur->child_elem->exit_code = exit_code;
 
-  for (i = 0; i < 128; i++)
+  for (i = 3; i < 128; i++)
   {
     if(cur->file_des[i] != NULL)
       sys_close(i, f);
@@ -303,6 +303,8 @@ sys_open (char *file, struct intr_frame *f)
     f->eax = -1;
   else
   {
+    if(!strcmp(thread_current()->name, file))
+      file_deny_write(open_f);
     thread_current()->file_des[fd] = open_f;
     thread_current()->next_fd += 1;
     f->eax = fd;
@@ -339,7 +341,7 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
     }
     f->eax = i;
   }
-  else if(fd >= 2)
+  else if(fd > 2)
   {
     if(thread_current()->file_des[fd] == NULL || !check_mem(buffer))
       sys_exit(-1, NULL);
@@ -364,7 +366,7 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
     putbuf(buffer, size);
     f->eax = size;
   }
-  else if (fd >= 2)
+  else if (fd > 2)
   {
     if(thread_current()->file_des[fd] == NULL)
       sys_exit(-1, NULL);
@@ -401,6 +403,8 @@ sys_close (int fd, struct intr_frame *f UNUSED)
   struct thread *cur;
 
   cur = thread_current ();
+  if(cur->file_des[fd] != NULL)
+    file_allow_write (cur->file_des[fd]);
   file_close (cur->file_des[fd]);
   cur->file_des[fd] = NULL;
 }
