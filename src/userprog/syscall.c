@@ -21,9 +21,9 @@ void sys_create(char *, size_t, struct intr_frame *);
 void sys_remove(char *, struct intr_frame*);
 void sys_open(char *, struct intr_frame *);
 void sys_filesize(int , struct intr_frame*);
-void sys_read(int , void *, unsigned int , struct intr_frame *);
-void sys_write(int , void *, unsigned int, struct intr_frame *);
-void sys_seek(int, int, struct intr_frame * UNUSED);
+void sys_read(int , void *, unsigned, struct intr_frame *);
+void sys_write(int , void *, unsigned, struct intr_frame *);
+void sys_seek(int, unsigned, struct intr_frame * UNUSED);
 void sys_tell(int , struct intr_frame *f);
 void sys_close(int , struct intr_frame * UNUSED);
 
@@ -93,7 +93,7 @@ syscall_handler (struct intr_frame *f)
   switch(syscall_number) {
     case SYS_HALT:
     {
-      sys_halt (); // 
+      sys_halt (); //
       break;
     }
     case SYS_EXIT:
@@ -122,28 +122,46 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_CREATE:
     {
-      char * name;
+      char * file;
       size_t size;
-      read_mem(&name, esp+4, sizeof(name));
+      read_mem(&file, esp+4, sizeof(file));
       read_mem(&size, esp+8, sizeof(size));
 
-      sys_create(name, size, f);
+      sys_create(file, size, f);
       break;
     }
     case SYS_REMOVE:
+    {
+      char *file;
+      read_mem(&file, esp+4, sizeof(file));
+
+      sys_remove(file, f);
       break;
+    }
     case SYS_OPEN:
+    {
+      char *file;
+      read_mem(&file, esp+4, sizeof(file));
+
+      sys_open(file, f);
       break;
+    }
     case SYS_FILESIZE:
+    {
+      int fd;
+      read_mem(&fd, esp+4, sizeof(fd));
+
+      sys_filesize(fd, f);
       break;
+    }
     case SYS_READ:
     {
       int fd;
       void *buffer;
-      unsigned int size;
-      read_mem(&fd, esp+4, sizeof(int));
-      read_mem(&buffer, esp+8, sizeof(void *));
-      read_mem(&size, esp+12, sizeof(unsigned int));
+      unsigned size;
+      read_mem(&fd, esp+4, sizeof(fd));
+      read_mem(&buffer, esp+8, sizeof(buffer));
+      read_mem(&size, esp+12, sizeof(size));
 
       sys_read(fd, buffer, size, f);
       break;
@@ -152,20 +170,40 @@ syscall_handler (struct intr_frame *f)
     {
       int fd;
       void *buffer;
-      unsigned int size;
+      unsigned size;
+      read_mem(&fd, esp+4, sizeof(fd));
+      read_mem(&buffer, esp+8, sizeof(buffer));
+      read_mem(&size, esp+12, sizeof(size));
 
-      read_mem(&fd, esp+4, sizeof(int));
-      read_mem(&buffer, esp+8, sizeof(void *));
-      read_mem(&size, esp+12, sizeof(unsigned int));
       sys_write(fd, buffer, size, f);
       break;
     }
     case SYS_SEEK:
+    {
+      int fd;
+      unsigned position;
+      read_mem(&fd, esp+4, sizeof(fd));
+      read_mem(&position, esp+8, sizeof(position));
+
+      sys_seek(fd, position, f);
       break;
+    }
     case SYS_TELL:
+    {
+      int fd;
+      read_mem(&fd, esp+4, sizeof(fd));
+
+      sys_tell(fd, f);
       break;
+    }
     case SYS_CLOSE:
+    {
+      int fd;
+      read_mem(&fd, esp+4, sizeof(fd));
+
+      sys_close(fd, f);
       break;
+    }
   }
 }
 
@@ -182,10 +220,17 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
 {
   //printf("sys_exit\n");
   struct thread *cur;
+  int i;
 
   cur = thread_current();
   if (cur->child_elem != NULL)
     cur->child_elem->exit_code = exit_code;
+
+  for (i = 0; i < 128; i++)
+  {
+    if(thread_current()->file_des[i] != NULL)
+      sys_close(i, f);
+  }
 
   printf("%s: exit(%d)\n", thread_current()->name, exit_code);
   thread_exit();
@@ -199,7 +244,7 @@ sys_exec (void *cmd, struct intr_frame *f)
   //printf("sys_exec\n");
   int ret;
 
-  check_mem (cmd);
+  //check_mem (cmd);
 
   lock_acquire(&syscall_handler_lock);
   ret = process_execute ((char*)cmd);
@@ -222,47 +267,121 @@ sys_wait(int tid, struct intr_frame *f)
 }
 
 void
-sys_create(char *name, size_t size, struct intr_frame *f)
+sys_create(char *file, size_t size, struct intr_frame *f)
 {
-  check_mem (name);
-
+  //check_mem (name);
+  if(file == NULL)
+    sys_exit(-1, f);
   lock_acquire(&syscall_handler_lock);
-  f->eax = filesys_create((const char*)name,size);
+  f->eax = filesys_create(file, size);
   lock_release(&syscall_handler_lock);
-}
 
-void
-sys_read(int fd, void *buffer, unsigned int size, struct intr_frame *f)
-{
   return;
 }
 
 void
-sys_write(int fd, void *buffer, unsigned int size, struct intr_frame *f)
+sys_remove(char *file, struct intr_frame *f)
+{
+  if(file == NULL)
+    sys_exit(-1, f);
+  lock_acquire(&syscall_handler_lock);
+  f->eax = filesys_remove(file);
+  lock_release(&syscall_handler_lock);
+
+  return;
+}
+
+void
+sys_open(char *file, struct intr_frame *f)
+{
+  if(file == NULL)
+    sys_exit(-1, f);
+  int fd = thread_current()->next_fd;
+  struct file* open_f = filesys_open(file);
+  if(open_f == NULL)
+    f->eax = -1;
+  else
+  {
+    thread_current()->file_des[fd] = open_f;
+    thread_current()->next_fd += 1;
+  }
+
+  return;
+}
+
+void
+sys_filesize(int fd, struct intr_frame* f)
+{
+  f->eax = file_length(thread_current()->file_des[fd]);
+
+  return;
+}
+
+void
+sys_read(int fd, void *buffer, unsigned size, struct intr_frame *f)
+{
+  int i = 0;
+  lock_acquire(&syscall_handler_lock);
+  if (fd == 0)
+  {
+    for(i = 0; i < size; i++)
+    {
+      ((char *)buffer)[i] = input_getc();
+      if(((char *)buffer)[i] == '\0')
+        break;
+    }
+    f->eax = i;
+  }
+  else if(fd >= 2)
+  {
+    f->eax = file_read(thread_current()->file_des[fd], buffer, size);
+  }
+  else
+    f->eax = -1;
+  lock_release(&syscall_handler_lock);
+
+  return;
+}
+
+void
+sys_write(int fd, void *buffer, unsigned size, struct intr_frame *f)
 {
   //printf("sys_write\n");
-  if(buffer == NULL) 
+  if(buffer == NULL)
     sys_exit(-1,NULL);
 
   lock_acquire(&syscall_handler_lock);
-  switch(fd) {
-    case 0: //stdin
-    {
-      f->eax=-1;
-      break;
-    }
-    case 1: //stdout
-    {
-      putbuf(buffer, size);
-      f->eax=size;
-      break;
-    }
-    default: //filedescriptor
-    {
-      break;
-    }
+  if (fd == 1)
+  {
+    putbuf(buffer, size);
+    f->eax = size;
   }
+  else if (fd >= 2)
+  {
+    f->eax = file_write(thread_current()->file_des[fd], buffer, size);
+  }
+  else
+    f->eax = -1;
   lock_release(&syscall_handler_lock);
 
   return;
+}
+
+void
+sys_seek(int fd, unsigned position, struct intr_frame *f UNUSED)
+{
+  file_seek(thread_current()->file_des[fd], position);
+}
+
+void
+sys_tell(int fd, struct intr_frame *f)
+{
+  f->eax = file_tell(thread_current()->file_des[fd]);
+}
+
+void
+sys_close(int fd, struct intr_frame *f UNUSED)
+{
+  file_close(thread_current()->file_des[fd]);
+  thread_current()->file_des[fd] = NULL;
 }

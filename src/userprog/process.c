@@ -21,7 +21,7 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void argument_passing (char **args, int count, void **esp);
-struct thread_arg 
+struct thread_arg
 {
   char *file_name;
   struct thread *parent;
@@ -40,11 +40,16 @@ process_execute (const char *file_name)
   tid_t tid;
   char *token, *save_ptr;
   struct thread_arg *arg;
-  
+  int i;
+
   /* semaphore for loading child process */
   cur = thread_current ();
   cur->load_sema = (struct semaphore *) malloc (sizeof (struct semaphore));
   sema_init (cur->load_sema, 0);
+
+  cur->next_fd = 2;
+  for (i = 0; i < 128; i++)
+    cur->file_des[i] = NULL;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -134,7 +139,7 @@ start_process (void *arg)
   palloc_free_page (file_name);
   palloc_free_page (args);
   free (arg);
-  
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -201,7 +206,6 @@ process_wait (tid_t child_tid)
   struct list *child_list;
   struct child_elem *ce;
   struct list_elem *le;
-  int count = 0;
 
   /* find child with same child_tid */
   child_list = &(thread_current ()->child_list);
@@ -227,7 +231,7 @@ process_wait (tid_t child_tid)
       }
     }
   }
-  
+
   return -1;
 }
 

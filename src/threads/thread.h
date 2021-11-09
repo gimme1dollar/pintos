@@ -110,11 +110,13 @@ struct thread
     /* project 2 */
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
-    
     struct semaphore *load_sema;
     struct list child_list;
     struct child_elem *child_elem;
+    
+    uint32_t *pagedir;                  /* Page directory. */
+    int next_fd;
+    struct file *file_des[128];
 #endif
 
     /* Owned by thread.c. */
@@ -129,15 +131,15 @@ extern bool thread_mlfqs;
 struct donation_elem
 {
     struct list_elem elem;              /* List element. */
-    
+
     struct lock* lock_id;
     int donated_priority;
 };
 
 struct child_elem
 {
-   struct list_elem elem;         
-   
+   struct list_elem elem;
+
    tid_t tid;
    int exit_code;
    struct semaphore wait_sema;
@@ -187,4 +189,3 @@ void thread_compute_priority_all(void);
 
 bool priority_less(const struct list_elem* a_, const struct list_elem* b_, void* aux);
 #endif /* threads/thread.h */
-
