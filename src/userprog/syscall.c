@@ -218,7 +218,7 @@ sys_halt (void)
 void
 sys_exit (int exit_code, struct intr_frame *f UNUSED)
 {
-  //printf("sys_exit\n");
+  //printf("sys_exit %d\n", exit_code);
   struct thread *cur;
   int i;
 
@@ -228,11 +228,11 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
 
   for (i = 0; i < 128; i++)
   {
-    if(thread_current()->file_des[i] != NULL)
+    if(cur->file_des[i] != NULL)
       sys_close(i, f);
   }
 
-  printf("%s: exit(%d)\n", thread_current()->name, exit_code);
+  printf("%s: exit(%d)\n", cur->name, exit_code);
   thread_exit();
 
   return;
@@ -242,14 +242,10 @@ void
 sys_exec (void *cmd, struct intr_frame *f)
 {
   //printf("sys_exec\n");
-  int ret;
 
-  //check_mem (cmd);
-
-  lock_acquire(&syscall_handler_lock);
-  ret = process_execute ((char*)cmd);
-  f->eax = ret;
-  lock_release(&syscall_handler_lock);
+  //lock_acquire(&syscall_handler_lock);
+  f->eax = process_execute ((char*)cmd);
+  //lock_release(&syscall_handler_lock);
 
   return;
 }
@@ -272,6 +268,7 @@ sys_create (char *file, size_t size, struct intr_frame *f)
   //check_mem (name);
   if(file == NULL)
     sys_exit(-1, NULL);
+
   lock_acquire(&syscall_handler_lock);
   f->eax = filesys_create(file, size);
   lock_release(&syscall_handler_lock);
@@ -284,6 +281,7 @@ sys_remove (char *file, struct intr_frame *f)
 {
   if(file == NULL)
     sys_exit(-1, NULL);
+
   lock_acquire(&syscall_handler_lock);
   f->eax = filesys_remove(file);
   lock_release(&syscall_handler_lock);
@@ -296,9 +294,11 @@ sys_open (char *file, struct intr_frame *f)
 {
   if(file == NULL)
     sys_exit(-1, NULL);
+
   int fd = thread_current()->next_fd;
   lock_acquire(&syscall_handler_lock);
   struct file* open_f = filesys_open(file);
+
   if(open_f == NULL)
     f->eax = -1;
   else
@@ -315,7 +315,10 @@ sys_open (char *file, struct intr_frame *f)
 void
 sys_filesize (int fd, struct intr_frame* f)
 {
-  f->eax = file_length(thread_current()->file_des[fd]);
+  struct thread *cur;
+
+  cur = thread_current ();
+  f->eax = file_length (cur->file_des[fd]);
 
   return;
 }
@@ -325,7 +328,7 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
 {
   int i = 0;
   lock_acquire(&syscall_handler_lock);
-  if (fd == 0)
+  if (fd == 0) // stdin
   {
     for(i = 0; i < size; i++)
     {
@@ -356,7 +359,7 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
     sys_exit(-1,NULL);
 
   lock_acquire(&syscall_handler_lock);
-  if (fd == 1)
+  if (fd == 1) // stdout
   {
     putbuf(buffer, size);
     f->eax = size;
@@ -377,18 +380,27 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
 void
 sys_seek (int fd, unsigned position, struct intr_frame *f UNUSED)
 {
-  file_seek(thread_current()->file_des[fd], position);
+  struct thread *cur;
+
+  cur = thread_current ();
+  file_seek(cur->file_des[fd], position);
 }
 
 void
 sys_tell (int fd, struct intr_frame *f)
 {
-  f->eax = file_tell(thread_current()->file_des[fd]);
+  struct thread *cur;
+
+  cur = thread_current ();
+  f->eax = file_tell(cur->file_des[fd]);
 }
 
 void
 sys_close (int fd, struct intr_frame *f UNUSED)
 {
-  file_close(thread_current()->file_des[fd]);
-  thread_current()->file_des[fd] = NULL;
+  struct thread *cur;
+
+  cur = thread_current ();
+  file_close(cur->file_des[fd]);
+  cur->file_des[fd] = NULL;
 }

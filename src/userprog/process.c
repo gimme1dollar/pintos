@@ -35,10 +35,11 @@ struct thread_arg
 tid_t
 process_execute (const char *file_name)
 {
+  //printf("in process_exectue\n");
   struct thread *cur;
   char *fn_copy;
   tid_t tid;
-  char *token, *save_ptr;
+  char *thread_name, *save_ptr;
   struct thread_arg *arg;
   int i;
 
@@ -46,7 +47,8 @@ process_execute (const char *file_name)
   cur = thread_current ();
   cur->load_sema = (struct semaphore *) malloc (sizeof (struct semaphore));
   sema_init (cur->load_sema, 0);
-
+  cur->is_loaded = 0;
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -57,20 +59,32 @@ process_execute (const char *file_name)
   }
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  /* Create a new thread to execute FILE_NAME. */
+  thread_name = strtok_r (fn_copy, " ", &save_ptr);
+
   /* build argument for start_process */
   arg = (struct thread_arg *) malloc (sizeof(struct thread_arg));
-  arg->file_name = fn_copy;
+  arg->file_name = palloc_get_page (0);
+  strlcpy(arg->file_name, file_name, PGSIZE);
+  //arg->file_name = fn_copy;
   arg->parent = cur;
 
-  /* Create a new thread to execute FILE_NAME. */
-  token = strtok_r (file_name, " ", &save_ptr);
-  tid = thread_create (token, PRI_DEFAULT, start_process, arg);
+  tid = thread_create (thread_name, PRI_DEFAULT, start_process, arg);
 
   if (tid == TID_ERROR)
+  {
     palloc_free_page (fn_copy);
+    palloc_free_page (arg->file_name);
+    free (arg);
+  }
   else
+  {
     sema_down(cur->load_sema);
+  }
 
+  if(cur->is_loaded != 1) {
+    return -1;
+  }
   free(cur->load_sema);
   return tid;
 }
@@ -81,7 +95,8 @@ process_execute (const char *file_name)
 static void
 start_process (void *arg)
 {
-  struct thread *parent;
+  //printf("in start_process\n");
+  struct thread *parent, *child;
   char *file_name;
 
   char **args;
@@ -91,8 +106,9 @@ start_process (void *arg)
   int count = 0;
 
   /* parse thread_arg */
-  parent = ((struct thread_arg *)arg)->parent;
   file_name = ((struct thread_arg *)arg)->file_name;
+  parent = ((struct thread_arg *)arg)->parent;
+  child = thread_current ();
 
   /* parse arguments list of the userprogram */
   args = palloc_get_page (0);
@@ -111,6 +127,7 @@ start_process (void *arg)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
+  parent->is_loaded = success;
 
   if(success)
   {
@@ -120,8 +137,8 @@ start_process (void *arg)
     struct child_elem *ce = malloc (sizeof(struct child_elem));
     ce->exit_code = -1;
     sema_init (&ce->wait_sema, 0);
-    ce->tid = thread_current()->tid;
-    thread_current()->child_elem = ce;
+    ce->tid = child->tid;
+    child->child_elem = ce;
     list_push_back (&parent->child_list, &ce->elem);
 
     sema_up (parent->load_sema);
@@ -129,7 +146,7 @@ start_process (void *arg)
   else /* If load failed, quit. */
   {
     sema_up (parent->load_sema);
-    thread_exit ();
+    sys_exit (-1, NULL);
   }
 
   palloc_free_page (file_name);
