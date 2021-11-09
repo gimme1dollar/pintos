@@ -93,7 +93,7 @@ syscall_handler (struct intr_frame *f)
   switch(syscall_number) {
     case SYS_HALT:
     {
-      sys_halt (); //
+      sys_halt (); 
       break;
     }
     case SYS_EXIT:
@@ -326,7 +326,8 @@ sys_filesize (int fd, struct intr_frame* f)
 void
 sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
 {
-  int i = 0;
+  int i;
+
   lock_acquire(&syscall_handler_lock);
   if (fd == 0) // stdin
   {
@@ -354,9 +355,8 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
 void
 sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
 {
-  //printf("sys_write\n");
-  if(buffer == NULL)
-    sys_exit(-1,NULL);
+  if (!check_mem (buffer))
+    sys_exit (-1, NULL);
 
   lock_acquire(&syscall_handler_lock);
   if (fd == 1) // stdout
@@ -366,7 +366,7 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   }
   else if (fd >= 2)
   {
-    if(thread_current()->file_des[fd] == NULL || !check_mem(buffer))
+    if(thread_current()->file_des[fd] == NULL)
       sys_exit(-1, NULL);
     f->eax = file_write(thread_current()->file_des[fd], buffer, size);
   }
@@ -401,6 +401,6 @@ sys_close (int fd, struct intr_frame *f UNUSED)
   struct thread *cur;
 
   cur = thread_current ();
-  file_close(cur->file_des[fd]);
+  file_close (cur->file_des[fd]);
   cur->file_des[fd] = NULL;
 }
