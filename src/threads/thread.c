@@ -700,6 +700,7 @@ is_thread (struct thread *t)
 static void
 init_thread (struct thread *t, const char *name, int priority)
 {
+  int i;
   enum intr_level old_level;
 
   ASSERT (t != NULL);
@@ -721,6 +722,9 @@ init_thread (struct thread *t, const char *name, int priority)
 
 #ifdef USERPROG
   list_init (&t->child_list);
+  t->next_fd = 2;
+  for (i = 0; i < 128; i++)
+    t->file_des[i] = NULL;
 #endif
 
   t->nice = 0;

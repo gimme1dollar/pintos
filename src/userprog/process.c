@@ -47,10 +47,6 @@ process_execute (const char *file_name)
   cur->load_sema = (struct semaphore *) malloc (sizeof (struct semaphore));
   sema_init (cur->load_sema, 0);
 
-  cur->next_fd = 2;
-  for (i = 0; i < 128; i++)
-    cur->file_des[i] = NULL;
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);

@@ -110,11 +110,12 @@ struct thread
     /* project 2 */
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+    
     struct semaphore *load_sema;
     struct list child_list;
     struct child_elem *child_elem;
     
-    uint32_t *pagedir;                  /* Page directory. */
     int next_fd;
     struct file *file_des[128];
 #endif
