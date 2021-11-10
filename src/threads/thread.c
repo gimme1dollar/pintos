@@ -723,7 +723,7 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   list_init (&t->child_list);
   t->next_fd = 3;
-  for (i = 0; i < 128; i++)
+  for (i = 0; i < 131; i++)
     t->file_des[i] = NULL;
 #endif
 

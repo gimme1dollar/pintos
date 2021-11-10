@@ -118,7 +118,7 @@ struct thread
     struct semaphore *load_sema;
     
     int next_fd;
-    struct file *file_des[128];
+    struct file *file_des[131];
 #endif
 
     /* Owned by thread.c. */

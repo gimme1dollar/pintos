@@ -226,7 +226,7 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
   if (cur->child_elem != NULL)
     cur->child_elem->exit_code = exit_code;
 
-  for (i = 3; i < 128; i++)
+  for (i = 3; i < 131; i++)
   {
     if(cur->file_des[i] != NULL)
       sys_close(i, f);

@@ -71,20 +71,21 @@ process_execute (const char *file_name)
 
   tid = thread_create (thread_name, PRI_DEFAULT, start_process, arg);
 
-  if (tid == TID_ERROR)
-  {
-    palloc_free_page (fn_copy);
-    palloc_free_page (arg->file_name);
-    free (arg);
-  }
-  else
+  if (tid != TID_ERROR)
   {
     sema_down(cur->load_sema);
   }
 
   if(cur->is_loaded != 1) {
+    palloc_free_page (fn_copy);
+    palloc_free_page (arg->file_name);
+    free (arg);
+    free(cur->load_sema);
     return -1;
   }
+  palloc_free_page (fn_copy);
+  palloc_free_page (arg->file_name);
+  free (arg);
   free(cur->load_sema);
   return tid;
 }
@@ -149,9 +150,7 @@ start_process (void *arg)
     sys_exit (-1, NULL);
   }
 
-  palloc_free_page (file_name);
   palloc_free_page (args);
-  free (arg);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
