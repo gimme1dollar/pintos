@@ -303,8 +303,6 @@ sys_open (char *file, struct intr_frame *f)
     f->eax = -1;
   else
   {
-    if(!strcmp(thread_current()->name, file))
-      file_deny_write(open_f);
     thread_current()->file_des[fd] = open_f;
     thread_current()->next_fd += 1;
     f->eax = fd;
@@ -403,8 +401,6 @@ sys_close (int fd, struct intr_frame *f UNUSED)
   struct thread *cur;
 
   cur = thread_current ();
-  if(cur->file_des[fd] != NULL)
-    file_allow_write (cur->file_des[fd]);
   file_close (cur->file_des[fd]);
   cur->file_des[fd] = NULL;
 }

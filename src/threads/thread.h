@@ -119,6 +119,8 @@ struct thread
     
     int next_fd;
     struct file *file_des[131];
+
+    struct file *run_file;
 #endif
 
     /* Owned by thread.c. */
