@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -169,6 +170,8 @@ argument_passing (char **args, int count, void **esp)
 {
   char* address[100];
   int i, j, total = 0, word_align;
+
+  /* argv */
   for(i = count - 1; i >= 0; i--)
   {
     for(j = strlen(args[i]); j >= 0; j--)
@@ -180,22 +183,31 @@ argument_passing (char **args, int count, void **esp)
     address[i] = *esp;
   }
 
+  /* */
   word_align = 4 - total % 4;
   word_align = word_align == 4 ? 0 : word_align;
   *esp = *esp - word_align;
 
+  /* */
   *esp = *esp - sizeof(char*);
   memset(*esp, 0, sizeof(char*));
 
+  /* */
   for(i = count - 1; i >= 0; i--)
   {
     *esp = *esp - sizeof(char*);
     memcpy(*esp, &address[i], sizeof(char*));
   }
+
+  /* argv */
   *esp = *esp - sizeof(char**);
   **(int **)esp = (int)(*esp + sizeof(char**));
+
+  /* argc */ 
   *esp = *esp - sizeof(int);
   **(int **)esp = count;
+
+  /* return address */
   *esp = *esp - sizeof(void*);
   **(int **)esp = 0;
 }
@@ -359,6 +371,11 @@ struct Elf32_Phdr
 static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
+                          uint32_t read_bytes, uint32_t zero_bytes,
+                          bool writable);
+                          
+static bool lazy_setup_stack (void **esp);
+static bool lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
@@ -587,6 +604,53 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
+static bool
+lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
+              uint32_t read_bytes, uint32_t zero_bytes, bool writable)
+{
+  ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
+  ASSERT (pg_ofs (upage) == 0);
+  ASSERT (ofs % PGSIZE == 0);
+
+  struct thread *t;
+
+  t = thread_current ();
+  while (read_bytes > 0 || zero_bytes > 0)
+    {
+      /* Calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from FILE
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      /* Make a page table entry */
+      struct s_pte *pte = (struct s_pte *) malloc (sizeof(struct s_pte));
+      if (pte == NULL)
+        return false;
+
+      pte->tid = t->tid;
+      pte->type = s_pte_type_FILE;
+      pte->file = file;
+      pte->upage = upage;
+      pte->file_page;
+      pte->page_offset = ofs;
+      pte->read_bytes = page_read_bytes;
+      pte->zero_bytes = page_zero_bytes;
+      pte->writable = writable;
+      pte->mmap;
+      pte->swap_slot;
+      
+      /* Add the page table entry */
+      hash_insert (&(t->s_page_table), &pte->elem);
+
+      /* Advance. */
+      read_bytes -= page_read_bytes;
+      zero_bytes -= page_zero_bytes;
+      upage += PGSIZE;
+    }
+  return true;
+}
+
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
@@ -605,6 +669,26 @@ setup_stack (void **esp)
         palloc_free_page (kpage);
     }
   return success;
+}
+
+static bool
+lazy_setup_stack (void **esp)
+{
+  uint8_t *kpage;
+  bool success = false;
+
+  kpage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  if (kpage != NULL)
+    {
+      success = load_segment_stack(kpage);;
+      if (success)
+        *esp = PHYS_BASE;
+      else
+        return false;
+    }
+  return success;
+
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
