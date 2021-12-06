@@ -19,6 +19,8 @@ struct s_pte {
     int type; // { FILE, STACK, ... }
     uint8_t *table_number;
 
+    bool writable;
+
     /* to load from file */
     struct file *file;
     uint8_t *upage;
@@ -26,7 +28,6 @@ struct s_pte {
     off_t page_offset;
     uint32_t read_bytes;
     uint32_t zero_bytes;
-    bool writable;
 
     /* to load from mmap */
     size_t mmap; // ?
@@ -41,10 +42,11 @@ void s_page_init(struct hash *target_table);
 void s_page_free(struct hash *target_table);
 
 struct s_pte *s_page_lookup(void *kpage);
+struct s_pte *grow_stack(void* page);
 
 bool load_segment_from_file(struct s_pte *entry);
 bool load_segment_from_mmap();
 bool load_segment_from_swap();
-bool load_segment_stack();
+bool load_segment_stack(struct s_pte *entry);
 
 #endif

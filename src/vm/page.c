@@ -73,20 +73,20 @@ s_page_lookup(void *page)
 bool
 s_page_load(struct s_pte *entry) 
 {
+    //printf("in s_page_load %d\n", entry->tid);
     switch (entry->type) 
     {
         case s_pte_type_STACK:
-            break;
+            return load_segment_stack(entry);
         case s_pte_type_FILE:
-            load_segment_from_file(entry);
-            break;
+            return load_segment_from_file(entry);
         case s_pte_type_MMAP:
-            break;
+            return false;
         case s_pte_type_SWAP:
-            break;
+            return false;
         default:
-            printf("something is wrong\n");
-            break;
+            printf("something is wrong in s_pte type\n");
+            return false;
     }
 }
 
@@ -95,31 +95,31 @@ load_segment_from_file(struct s_pte *entry)
 {
     bool page_install;
 
-    /* Get a page of memory. */
-    void *kpage = palloc_get_page (PAL_USER);
-    if (kpage == NULL)
-    return false;
+    /* Get a frame */
+    void *frame = palloc_get_page (PAL_USER);
+    if (frame == NULL)
+        return false;
 
     /* Load this page. */
     file_seek (entry->file, entry->page_offset);
-    if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes)
+    if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
     {
-        palloc_free_page (kpage);
-        printf("file load false\n");
+        palloc_free_page (frame);
+    //    printf("file load false\n");
         return false;
     }
-    memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
+    memset (frame + entry->read_bytes, 0, entry->zero_bytes);
 
-    /* Add the page to the process's address space. */
+    /* Link page and frame */
     page_install = pagedir_get_page (thread_current()->pagedir, entry->upage) == NULL
-          && pagedir_set_page (thread_current()->pagedir, entry->upage, kpage, entry->writable);
+          && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
     if (!page_install)
     {
-        palloc_free_page (kpage);
-        printf("file load false!\n");
+        palloc_free_page (frame);
+   //     printf("file load false!\n");
         return false;
     }
-    printf("file load true!\n");
+ //   printf("file load true!\n");
     return true;
 }
 
@@ -136,7 +136,59 @@ load_segment_from_swap()
 }
 
 bool 
-load_segment_stack()
+load_segment_stack(struct s_pte *entry)
 {
+    bool page_install;
+
+    /* get frame */
+    uint8_t *frame;
+    frame = palloc_get_page (PAL_USER | PAL_ZERO);
+    if (frame == NULL)
+        return false;
+    
+    /* set zero */
+    memset (frame, 0, PGSIZE);
+
+    /* Load this page. */
+    page_install = pagedir_get_page (thread_current()->pagedir, entry->upage) == NULL
+          && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
+    if (!page_install)
+    {
+        palloc_free_page (frame);
+        return false;
+    }
+
+    return page_install;
 }
 
+struct s_pte *
+grow_stack(void* page)
+{
+    struct thread *t;
+    struct s_pte* pte;
+    size_t prevs;
+    uint8_t start;
+
+    t = thread_current ();
+
+    /* Make a page table entry */
+    pte = (struct s_pte *) malloc (sizeof(struct s_pte));
+    if (pte == NULL)
+        return false;
+
+    pte->tid = t->tid;
+    pte->type = s_pte_type_STACK;
+    pte->table_number = page;
+    
+    pte->writable = true;
+    pte->file;
+    pte->upage = page;
+    pte->file_page;
+    pte->page_offset;
+    pte->read_bytes;
+    pte->zero_bytes;
+    pte->mmap;
+    pte->swap_slot;
+
+    return pte;     
+}
