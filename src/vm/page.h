@@ -17,7 +17,7 @@ struct s_pte {
     struct hash_elem elem;
     tid_t tid;
     int type; // { FILE, STACK, ... }
-    int vaddr;
+    uint8_t *table_number;
 
     /* to load from file */
     struct file *file;
@@ -35,16 +35,16 @@ struct s_pte {
     size_t swap_slot; // ?
 };
 
-void s_page_init();
-void s_page_free();
-
-struct s_pte *s_page_lookup();
-
-void load_segment_from_file();
-void load_segment_from_swap();
-bool load_segment_stack(uint8_t *kpage);
-
 unsigned s_page_hash (const struct hash_elem *h, void *aux);
 bool s_page_less (const struct hash_elem *a, const struct hash_elem *b, void *aux);
+void s_page_init(struct hash *target_table);
+void s_page_free(struct hash *target_table);
+
+struct s_pte *s_page_lookup(void *kpage);
+
+bool load_segment_from_file(struct s_pte *entry);
+bool load_segment_from_mmap();
+bool load_segment_from_swap();
+bool load_segment_stack();
 
 #endif

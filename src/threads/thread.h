@@ -103,7 +103,6 @@ struct thread
     struct lock* acquiring_target_lock;
 
     /* project 2 */
-#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     
@@ -116,10 +115,9 @@ struct thread
     struct file *file_des[131];
 
     struct file *run_file;
-#endif
 
     /* project 3 */
-    struct hash s_page_table;
+    struct hash *s_page_table;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

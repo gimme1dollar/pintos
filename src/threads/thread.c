@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "fixed_point.h"
+#include "vm/page.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -87,6 +88,7 @@ static tid_t allocate_tid (void);
 void
 thread_init (void)
 {
+  printf("in thread init \n");
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
@@ -305,6 +307,8 @@ thread_exit (void)
   process_exit ();
 #endif
 
+  s_page_free(t->s_page_table);
+  
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
@@ -719,6 +723,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->parent = NULL;
   t->acquiring_target_lock = NULL;
   list_init (&t->donations_list);
+  t->nice = 0;
+  t->recent_cpu = 0;
 
 #ifdef USERPROG
   list_init (&t->child_list);
@@ -726,9 +732,6 @@ init_thread (struct thread *t, const char *name, int priority)
   for (i = 0; i < 131; i++)
     t->file_des[i] = NULL;
 #endif
-
-  t->nice = 0;
-  t->recent_cpu = 0;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
