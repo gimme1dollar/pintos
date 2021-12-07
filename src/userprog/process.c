@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/page.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -269,6 +270,7 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+  int iterator;
 
   if(cur->run_file != NULL)
   {
@@ -276,6 +278,11 @@ process_exit (void)
     file_close (cur->run_file);
   }
   
+  //printf("unmap on process exit\n");
+  for (iterator = 0; iterator < cur->next_mmap; iterator++) 
+  {
+    sys_munmap(iterator, NULL, false);
+  }
   s_page_free(cur->s_page_table);
 
   if(cur->s_page_table != NULL)

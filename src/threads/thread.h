@@ -113,15 +113,14 @@ struct thread
     
     int next_fd;
     struct file *file_des[131];
-
-    int mmap_id;
-    struct list mmap_list;
-
     struct file *run_file;
 
     /* project 3 */
     struct hash *s_page_table;
     uint8_t curr_esp;
+    
+    int next_mmap;
+    struct list mmap_list;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
@@ -153,8 +152,10 @@ struct mmap_elem
 {
    struct list_elem elem;
 
+   void *upage;
    int mmap_id;
-   struct list *pte;
+   struct file *file;
+   struct list s_pte_list;
 };
 
 void thread_init (void);

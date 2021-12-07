@@ -47,7 +47,7 @@ frame_destroy (struct hash_elem *e, void *aux)
 }
 
 void 
-frame_free()
+frame_free(struct thread *t)
 {
     hash_destroy(frame_table, frame_destroy);
     free(frame_table);

@@ -9,29 +9,6 @@
 #include "threads/vaddr.h"
 #include "vm/page.h"
 
-bool check_mem (void *addr);
-bool check_vm_mem (void *addr);
-bool check_buffer (void *buffer, unsigned size);
-int  load_mem (const uint8_t *addr);
-void read_mem (void *dst, void *src, size_t size);
-
-static void syscall_handler (struct intr_frame *);
-void sys_halt(void);
-void sys_exit(int , struct intr_frame *);
-void sys_exec(void *, struct intr_frame *);
-void sys_wait(int , struct intr_frame *);
-void sys_create(char *, size_t, struct intr_frame *);
-void sys_remove(char *, struct intr_frame*);
-void sys_open(char *, struct intr_frame *);
-void sys_filesize(int , struct intr_frame*);
-void sys_read(int , void *, unsigned, struct intr_frame *);
-void sys_write(int , void *, unsigned, struct intr_frame *);
-void sys_seek(int, unsigned, struct intr_frame * UNUSED);
-void sys_tell(int , struct intr_frame *);
-void sys_close(int , struct intr_frame * UNUSED);
-void sys_mmap(int, void *, struct intr_frame *);
-void sys_munmap(int, struct intr_frame *);
-
 struct lock syscall_handler_lock;
 
 bool
@@ -250,7 +227,7 @@ syscall_handler (struct intr_frame *f)
       int map_id;
       read_mem(&map_id, esp+4, sizeof(map_id));
 
-      sys_munmap(map_id, f);
+      sys_munmap(map_id, f, true);
       break;
     }
   }
@@ -463,6 +440,7 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
 {
   struct thread *t;
   struct s_pte* pte;
+  struct mmap_elem *me;
   uint32_t read_bytes;
   uint32_t zero_bytes;
   size_t page_read_bytes;
@@ -470,45 +448,64 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   off_t ofs;
   void* upage;
   int count;
-  int i, num_iters;
+  int i_iter, i_end;
 
+  /* file descriptor below is stdio */
   if(fd < 2) {
     f->eax = -1;
     return;
   }
+
+  /* addr should not be zero & be algiend */
   if(addr != pg_round_down(addr) || addr == 0) {
     f->eax = -1;
     return;
   }
 
+  /* get info from the file */
   t = thread_current ();
   upage = pg_round_down(addr);
-  read_bytes = file_length(t->file_des[fd]);
+  read_bytes = file_length(t->file_des[fd]); // length of file
   zero_bytes = PGSIZE - (read_bytes % PGSIZE);
   ofs = 0;
   count = 0;
   
+  /* file is of length zero */
   if(read_bytes == 0) {
     f->eax = -1;
     return;
   }
 
-  num_iters = read_bytes / PGSIZE;
-  num_iters += read_bytes % PGSIZE == 0 ? 0 : 1;
-
-  for(i = 0; i < num_iters; i++) {
-      if(s_page_lookup(addr + i * PGSIZE) != NULL) {
+  /* same address */
+  i_end = read_bytes / PGSIZE;
+  i_end += read_bytes % PGSIZE == 0 ? 0 : 1;
+  for(i_iter = 0; i_iter < i_end; i_iter++) {
+      if(s_page_lookup(upage + i_iter * PGSIZE) != NULL) {
         f->eax = -1;
         return;
       }
+  } 
+
+  /* create mmap_list_entry for thread */
+  me = (struct mmap_elem *)malloc(sizeof(struct mmap_elem));
+  if (me == NULL) {
+    f->eax = -1;
+    return;
+  }
+  list_init (&me->s_pte_list);
+  me->mmap_id = t->next_mmap;
+  me->upage = upage; // useful?
+  me->file = file_reopen(t->file_des[fd]); // reopen file
+
+  if (s_page_lookup (upage))
+  {
+    f->eax = -1;
+    return;
   }
 
+  /* make s_pte and insert into mmap_list of thread */
   while (read_bytes > 0 || zero_bytes > 0)
   {
-    // printf("in while of lazy_loading\n");
-    /* Calculate how to fill this page.
-        We will read PAGE_READ_BYTES bytes from FILE
-        and zero the final PAGE_ZERO_BYTES bytes. */
     page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
     page_zero_bytes = PGSIZE - page_read_bytes;
 
@@ -522,20 +519,25 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
     pte->tid = t->tid;
     pte->type = s_pte_type_MMAP;
     pte->table_number = upage + count * PGSIZE;
-    
     pte->writable = true;
-    pte->file = t->file_des[fd];
+
+    pte->file = me->file;
     pte->upage = upage + count * PGSIZE;
     pte->file_page;
     pte->page_offset = ofs;
     pte->read_bytes = page_read_bytes;
     pte->zero_bytes = page_zero_bytes;
-    pte->mmap_id = t->mmap_id;
+    pte->mmap_id = me->mmap_id;
+    pte->mmap_elem;
     pte->swap_slot;
     
-    //printf("table number: %d\n", pte->table_number);
+    /* Add to thread->mmap_list */
+    list_push_back (&(me->s_pte_list), &(pte->mmap_elem));
+
     /* Add the page table entry */
+    //printf("*** put s_pte mmap_id %d with %#08X\n", pte->mmap_id, pte->upage);
     hash_insert (t->s_page_table, &(pte->elem));
+    //printf("*** in hash_table s_pte mmap_id %d\n", s_page_lookup(pte->upage)->mmap_id);
 
     /* Advance. */
     count++;
@@ -543,41 +545,73 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
     zero_bytes -= page_zero_bytes;
     ofs += page_read_bytes;
     upage += PGSIZE;
-
-    struct mmap_elem *me = (struct mmap_elem *)malloc(sizeof(struct mmap_elem));
-    me->mmap_id = t->mmap_id;
-    me->pte = pte;
-    list_push_back (&(t->mmap_list), me);
   }
 
-  f->eax = t->mmap_id;
-  t->mmap_id++;
-
+  list_push_back(&t->mmap_list, &(me->elem));
+  f->eax = t->next_mmap;
+  t->next_mmap++;
   return;
 }
 
 void
-sys_munmap(int map_id, struct intr_frame *f)
+sys_munmap(int map_id, struct intr_frame *f, bool from_syscall)
 {
-  struct list_elem *e;
-  struct thread *t;
-  struct s_pte *pte;
+  //printf("in sys_munmap \n");
 
+  struct thread *t;
+  struct list_elem *e;
+  struct mmap_elem *me;
+  struct s_pte *pte;
+  bool me_found;
+  
   t = thread_current ();
 
+  /* find the target mmap_elem in the mmap_list to get list of s_pte's */
+  
+  //printf("iteration on mmap_list start \n");
+  me_found = false;
   for (e = list_begin (&(t->mmap_list)); e != list_end (&(t->mmap_list));
        e = list_next (e))
     {
-      struct mmap_elem *me = list_entry (e, struct mmap_elem, elem);
+      me = list_entry (e, struct mmap_elem, elem);
+
       if (me->mmap_id == map_id) {
-        
-        pte = me->pte;
-        if (pagedir_is_dirty (t->pagedir, pte->upage)) {
-          //printf("page is dirty!\n");
-          file_write_at (pte->file, pte->upage, pte->read_bytes, pte->page_offset);
-        }
-        s_page_delete(t->s_page_table, &(pte->elem));
-        free(list_remove (e));
+        // found mmap_elem
+        me_found = true;
+        break;
       }
     }
+  //printf("iteration on mmap_list over \n");
+
+  if (!me_found) 
+  {
+    return;
+  }
+
+  /* unmap all of the s_pte in the mmap_list of mmap_elem */
+  //printf("removing s_pte in mmap_list start \n");
+  for (e = list_begin (&me->s_pte_list); e != list_end (&me->s_pte_list); 
+       e = e)
+    {
+      pte = list_entry (e, struct s_pte, mmap_elem);
+      if (pagedir_is_dirty(t->pagedir, pte->upage))
+        {
+          //printf("dirty pagedir\n");
+          file_write_at (pte->file, pte->upage, pte->read_bytes, pte->page_offset);    
+        }
+
+      // delete from page_table
+      //printf("removing e\n");
+      e = list_remove (e); // remove s_pte from mmap_list in thread
+      s_page_delete (t->s_page_table, &(pte->elem)); // remove s_pte from s_page_table in thread
+      //printf("deletion complete\n");
+    }
+  //printf("removing s_pte in mmap_list over \n");
+
+  // finally remove mmap_list entry from mmap_list in thread
+  //printf("removing me start \n");
+  list_remove (&me->elem); 
+  free(me);
+  //printf("removing me over \n");
+  return;
 }

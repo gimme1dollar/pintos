@@ -721,7 +721,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->nice = 0;
   t->recent_cpu = 0;
 
-  t->mmap_id = 0;
+  t->next_mmap = 0;
   list_init (&t->mmap_list);
 
 #ifdef USERPROG

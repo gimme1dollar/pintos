@@ -31,9 +31,10 @@ struct s_pte {
 
     /* to load from mmap */
     int mmap_id;
+    struct list_elem mmap_elem;
 
     /* to load from swap-slot */
-    size_t swap_slot; // ?
+    size_t swap_slot;
 };
 
 unsigned s_page_hash (const struct hash_elem *h, void *aux);
