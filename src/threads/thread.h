@@ -118,6 +118,7 @@ struct thread
 
     /* project 3 */
     struct hash *s_page_table;
+    uint8_t curr_esp;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

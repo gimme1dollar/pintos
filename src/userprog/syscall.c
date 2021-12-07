@@ -7,8 +7,11 @@
 #include "threads/thread.h"
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
 
 bool check_mem (void *addr);
+bool check_vm_mem (void *addr);
+bool check_buffer (void *buffer, unsigned size);
 int  load_mem (const uint8_t *addr);
 void read_mem (void *dst, void *src, size_t size);
 
@@ -32,7 +35,31 @@ struct lock syscall_handler_lock;
 bool
 check_mem (void *addr)
 {
-  return addr != NULL && is_user_vaddr(addr);
+  //return addr != NULL && is_user_vaddr(addr);
+  return addr != NULL && is_vm_user_vaddr(addr);
+}
+
+bool
+check_vm_mem (void *addr)
+{
+  return check_mem(addr) && (s_page_lookup (pg_round_down(addr)) != NULL);
+}
+
+bool
+check_buffer (void *buffer, unsigned size)
+{
+  int s;
+  //printf("%#08X\n", buffer);
+  //printf("%#08X\n", pg_round_down(buffer));
+  for (s = 0; s < size; s++) 
+  {
+    if (! check_vm_mem (buffer+s)) {
+      //printf("### s is %d\n", s);
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /* Reads a byte at user virtual address UADDR.
@@ -86,8 +113,9 @@ syscall_handler (struct intr_frame *f)
 
   // read memory
   read_mem (&syscall_number, esp, sizeof(int));
+  thread_current ()->curr_esp = f->esp;
 
-  //printf ("system call with syscall_number %d\n", syscall_number);
+  //printf ("*** system call with syscall_number %d ***\n", syscall_number);
 
   // actions
   switch(syscall_number) {
@@ -162,6 +190,7 @@ syscall_handler (struct intr_frame *f)
       read_mem(&fd, esp+4, sizeof(fd));
       read_mem(&buffer, esp+8, sizeof(buffer));
       read_mem(&size, esp+12, sizeof(size));
+      //printf("size is %d\n", size);
 
       sys_read(fd, buffer, size, f);
       break;
@@ -339,10 +368,13 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
     }
     f->eax = i;
   }
-  else if(fd > 2)
+  else if(fd > 2) // file
   {
-    if(thread_current()->file_des[fd] == NULL || !check_mem(buffer))
+    if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size)){
+      //printf("buffer is not ok %d\n", !check_buffer(buffer, size));
       sys_exit(-1, NULL);
+    }
+
     f->eax = file_read(thread_current()->file_des[fd], buffer, size);
   }
   else
@@ -366,8 +398,9 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   }
   else if (fd > 2)
   {
-    if(thread_current()->file_des[fd] == NULL)
+    if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size))
       sys_exit(-1, NULL);
+
     f->eax = file_write(thread_current()->file_des[fd], buffer, size);
   }
   else

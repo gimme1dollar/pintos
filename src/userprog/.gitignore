@@ -1,3 +1,8 @@
 build
 bochsrc.txt
 bochsout.txt
+
+*.a
+*.o
+*.dsk
+*.sh

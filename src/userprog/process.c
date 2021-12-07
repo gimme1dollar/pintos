@@ -97,7 +97,6 @@ process_execute (const char *file_name)
 static void
 start_process (void *arg)
 {
-  //printf("in start_process\n");
   struct thread *parent, *child;
   char *file_name;
 
@@ -128,6 +127,12 @@ start_process (void *arg)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+
+  /* init page_table */
+  child->s_page_table = malloc(sizeof(struct s_pte));
+  s_page_init(child->s_page_table);
+
+  /* load */
   success = load (args[0], &if_.eip, &if_.esp);
   parent->is_loaded = success;
 
@@ -183,16 +188,15 @@ argument_passing (char **args, int count, void **esp)
     address[i] = *esp;
   }
 
-  /* */
+  /* word align */
   word_align = 4 - total % 4;
   word_align = word_align == 4 ? 0 : word_align;
   *esp = *esp - word_align;
 
-  /* */
   *esp = *esp - sizeof(char*);
   memset(*esp, 0, sizeof(char*));
 
-  /* */
+  /* argv lists */
   for(i = count - 1; i >= 0; i--)
   {
     *esp = *esp - sizeof(char*);
@@ -240,9 +244,7 @@ process_wait (tid_t child_tid)
       ce = list_entry (le, struct child_elem, elem);
       if(ce->tid == child_tid) {
         // wait for child to be exited (sema_up will be executed in thread_exit)
-        //printf("sema_down in process_wait for child_tid %d\n", child_tid);
         sema_down (&ce->wait_sema);
-        //printf("after sema_down child_tid %d\n", child_tid);
 
         // get exit_code
         exit_code = ce->exit_code;
@@ -270,6 +272,13 @@ process_exit (void)
   {
     file_allow_write (cur->run_file);
     file_close (cur->run_file);
+  }
+  
+  s_page_free(cur->s_page_table);
+  
+  if(cur->s_page_table != NULL)
+  {
+    free(cur->s_page_table);
   }
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -369,11 +378,11 @@ struct Elf32_Phdr
 #define PF_R 4          /* Readable. */
 
 static bool setup_stack (void **esp);
-static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
-                          
+static bool validate_segment (const struct Elf32_Phdr *, struct file *);
+
 static bool lazy_setup_stack (void **esp);
 static bool lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -386,6 +395,7 @@ static bool lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp)
 {
+  //printf("in load \n");
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -471,7 +481,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   read_bytes = 0;
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
-              if (!load_segment (file, file_page, (void *) mem_page,
+              //printf("lazy loading \n");
+              if (!lazy_load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
                 goto done;
             }
@@ -482,7 +493,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!lazy_setup_stack (esp))
     goto done;
 
   /* Start address. */
@@ -608,15 +619,18 @@ static bool
 lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
+  //printf("in lazy loading\n");
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
   struct thread *t;
+  struct s_pte *pte;
 
   t = thread_current ();
   while (read_bytes > 0 || zero_bytes > 0)
     {
+     // printf("in while of lazy_loading\n");
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
          and zero the final PAGE_ZERO_BYTES bytes. */
@@ -624,30 +638,37 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Make a page table entry */
-      struct s_pte *pte = (struct s_pte *) malloc (sizeof(struct s_pte));
+      pte = (struct s_pte *) malloc (sizeof(struct s_pte));
       if (pte == NULL)
         return false;
 
       pte->tid = t->tid;
       pte->type = s_pte_type_FILE;
+      pte->table_number = upage;
+      
+      pte->writable = writable;
       pte->file = file;
       pte->upage = upage;
       pte->file_page;
       pte->page_offset = ofs;
       pte->read_bytes = page_read_bytes;
       pte->zero_bytes = page_zero_bytes;
-      pte->writable = writable;
       pte->mmap;
       pte->swap_slot;
       
+      //printf("table number: %d\n", pte->table_number);
       /* Add the page table entry */
-      hash_insert (&(t->s_page_table), &pte->elem);
+      hash_insert (t->s_page_table, &(pte->elem));
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
+
+
+  //printf("end of lazy laoding!\n");
   return true;
 }
 
@@ -656,6 +677,7 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp)
 {
+  //printf("in setup_stack\n");
   uint8_t *kpage;
   bool success = false;
 
@@ -668,27 +690,40 @@ setup_stack (void **esp)
       else
         palloc_free_page (kpage);
     }
+  
+
+  //printf("out setup_stack\n");
   return success;
 }
 
 static bool
 lazy_setup_stack (void **esp)
 {
-  uint8_t *kpage;
+  //printf("in lazy_setup_stack\n");
+  struct thread *t;
+  struct s_pte *pte;
   bool success = false;
+  uint8_t *upage;
 
-  kpage = ((uint8_t *) PHYS_BASE) - PGSIZE;
-  if (kpage != NULL)
-    {
-      success = load_segment_stack(kpage);;
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        return false;
-    }
+  /* Make a s_pte */
+  upage = pg_round_down(((uint8_t *) PHYS_BASE) - PGSIZE);
+  //printf("######### lazy stack upage %#08X\n", upage);
+  pte = grow_stack(upage);
+  if(pte == NULL) 
+    return false;
+  else {
+    success = true;
+  }
+
+  // /* insert the entry into table */
+  // t = thread_current ();
+  // hash_insert(t->s_page_table, &(pte->elem));
+  
+  /* set esp */
+  if (success)
+    *esp = PHYS_BASE;
+  
   return success;
-
-  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

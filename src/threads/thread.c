@@ -13,9 +13,7 @@
 #include "threads/vaddr.h"
 #include "fixed_point.h"
 #include "vm/page.h"
-#ifdef USERPROG
 #include "userprog/process.h"
-#endif
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -295,7 +293,6 @@ thread_exit (void)
 
   t = thread_current ();
 
-#ifdef USERPROG
   //printf("userprog thread_exit\n");
 
   if (t->child_elem != NULL)
@@ -305,9 +302,6 @@ thread_exit (void)
   }
 
   process_exit ();
-#endif
-
-  s_page_free(t->s_page_table);
   
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
