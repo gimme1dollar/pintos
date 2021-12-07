@@ -39,10 +39,13 @@ struct s_pte {
 unsigned s_page_hash (const struct hash_elem *h, void *aux);
 bool s_page_less (const struct hash_elem *a, const struct hash_elem *b, void *aux);
 void s_page_init(struct hash *target_table);
+
+void s_page_destroy (struct hash_elem *e, void *aux);
 void s_page_free(struct hash *target_table);
 
 struct s_pte *s_page_lookup(void *kpage);
 struct s_pte *grow_stack(void* page);
+struct s_pte *valid_address(void *addr);
 
 bool load_segment_from_file(struct s_pte *entry);
 bool load_segment_from_mmap();

@@ -30,10 +30,22 @@ s_page_init(struct hash *target_table)
   hash_init(target_table, s_page_hash, s_page_less, NULL);
 }
 
+void
+s_page_destroy (struct hash_elem *e, void *aux)
+{
+    struct s_pte *s_pt;
+    
+    s_pt = hash_entry(e, struct s_pte, elem);  
+    free(s_pt);
+
+    return;
+}
 
 void 
 s_page_free(struct hash *target_table)
 {
+    hash_destroy(target_table, s_page_destroy);
+    
     return;
 }
 
@@ -46,21 +58,17 @@ s_page_lookup(void *page)
     struct s_pte finder, *entry;
     struct hash_elem *target;
 
+    /* find hash table with finder */
     t = thread_current();
-
-    //printf("table number (page): %d\n", page);
     finder.table_number = page;
-    //printf("table number: %d\n", finder.table_number);
     target = hash_find(t->s_page_table, &(finder.elem));
-    //printf("target is null %d\n", target == NULL);
-
     if(target == NULL)
     {
         return NULL;
     }
 
+    /* find the entry from table */
     entry = hash_entry (target, struct s_pte, elem);
-    
     if(entry == NULL)
     {
         return NULL;
@@ -100,12 +108,11 @@ load_segment_from_file(struct s_pte *entry)
     if (frame == NULL)
         return false;
 
-    /* Load this page. */
+    /* Set data to the frame from file */
     file_seek (entry->file, entry->page_offset);
     if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
     {
         palloc_free_page (frame);
-    //    printf("file load false\n");
         return false;
     }
     memset (frame + entry->read_bytes, 0, entry->zero_bytes);
@@ -116,10 +123,9 @@ load_segment_from_file(struct s_pte *entry)
     if (!page_install)
     {
         palloc_free_page (frame);
-   //     printf("file load false!\n");
         return false;
     }
- //   printf("file load true!\n");
+
     return true;
 }
 
@@ -166,15 +172,12 @@ grow_stack(void* page)
 {
     struct thread *t;
     struct s_pte* pte;
-    size_t prevs;
-    uint8_t start;
 
     t = thread_current ();
 
-    /* Make a page table entry */
     pte = (struct s_pte *) malloc (sizeof(struct s_pte));
     if (pte == NULL)
-        return false;
+        return NULL;
 
     pte->tid = t->tid;
     pte->type = s_pte_type_STACK;
@@ -189,6 +192,8 @@ grow_stack(void* page)
     pte->zero_bytes;
     pte->mmap;
     pte->swap_slot;
+
+    hash_insert(t->s_page_table, &(pte->elem));
 
     return pte;     
 }
