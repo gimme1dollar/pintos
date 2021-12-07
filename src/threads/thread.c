@@ -12,8 +12,9 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "fixed_point.h"
-#include "vm/page.h"
 #include "userprog/process.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -86,7 +87,7 @@ static tid_t allocate_tid (void);
 void
 thread_init (void)
 {
-  printf("in thread init \n");
+  //printf("in thread init \n");
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
@@ -719,6 +720,9 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->donations_list);
   t->nice = 0;
   t->recent_cpu = 0;
+
+  t->mmap_id = 0;
+  list_init (&t->mmap_list);
 
 #ifdef USERPROG
   list_init (&t->child_list);

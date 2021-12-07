@@ -129,8 +129,10 @@ start_process (void *arg)
   if_.eflags = FLAG_IF | FLAG_MBS;
 
   /* init page_table */
-  child->s_page_table = malloc(sizeof(struct s_pte));
+  child->s_page_table = malloc(sizeof(struct hash));
   s_page_init(child->s_page_table);
+
+  frame_init ();
 
   /* load */
   success = load (args[0], &if_.eip, &if_.esp);
@@ -275,7 +277,7 @@ process_exit (void)
   }
   
   s_page_free(cur->s_page_table);
-  
+
   if(cur->s_page_table != NULL)
   {
     free(cur->s_page_table);
@@ -653,7 +655,7 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
       pte->page_offset = ofs;
       pte->read_bytes = page_read_bytes;
       pte->zero_bytes = page_zero_bytes;
-      pte->mmap;
+      pte->mmap_id;
       pte->swap_slot;
       
       //printf("table number: %d\n", pte->table_number);

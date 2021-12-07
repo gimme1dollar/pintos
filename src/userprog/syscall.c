@@ -27,8 +27,10 @@ void sys_filesize(int , struct intr_frame*);
 void sys_read(int , void *, unsigned, struct intr_frame *);
 void sys_write(int , void *, unsigned, struct intr_frame *);
 void sys_seek(int, unsigned, struct intr_frame * UNUSED);
-void sys_tell(int , struct intr_frame *f);
+void sys_tell(int , struct intr_frame *);
 void sys_close(int , struct intr_frame * UNUSED);
+void sys_mmap(int, void *, struct intr_frame *);
+void sys_munmap(int, struct intr_frame *);
 
 struct lock syscall_handler_lock;
 
@@ -113,7 +115,7 @@ syscall_handler (struct intr_frame *f)
 
   // read memory
   read_mem (&syscall_number, esp, sizeof(int));
-  thread_current ()->curr_esp = f->esp;
+  //thread_current ()->curr_esp = f->esp;
 
   //printf ("*** system call with syscall_number %d ***\n", syscall_number);
 
@@ -231,6 +233,24 @@ syscall_handler (struct intr_frame *f)
       read_mem(&fd, esp+4, sizeof(fd));
 
       sys_close(fd, f);
+      break;
+    }
+    case SYS_MMAP:
+    {
+      int fd;
+      void *addr;
+      read_mem(&fd, esp+4, sizeof(fd));
+      read_mem(&addr, esp+8, sizeof(addr));
+
+      sys_mmap(fd, addr, f);
+      break;
+    }
+    case SYS_MUNMAP:
+    {
+      int map_id;
+      read_mem(&map_id, esp+4, sizeof(map_id));
+
+      sys_munmap(map_id, f);
       break;
     }
   }
@@ -436,4 +456,128 @@ sys_close (int fd, struct intr_frame *f UNUSED)
   cur = thread_current ();
   file_close (cur->file_des[fd]);
   cur->file_des[fd] = NULL;
+}
+
+void
+sys_mmap(int fd, void* addr, struct intr_frame *f)
+{
+  struct thread *t;
+  struct s_pte* pte;
+  uint32_t read_bytes;
+  uint32_t zero_bytes;
+  size_t page_read_bytes;
+  size_t page_zero_bytes;
+  off_t ofs;
+  void* upage;
+  int count;
+  int i, num_iters;
+
+  if(fd < 2) {
+    f->eax = -1;
+    return;
+  }
+  if(addr != pg_round_down(addr) || addr == 0) {
+    f->eax = -1;
+    return;
+  }
+
+  t = thread_current ();
+  upage = pg_round_down(addr);
+  read_bytes = file_length(t->file_des[fd]);
+  zero_bytes = PGSIZE - (read_bytes % PGSIZE);
+  ofs = 0;
+  count = 0;
+  
+  if(read_bytes == 0) {
+    f->eax = -1;
+    return;
+  }
+
+  num_iters = read_bytes / PGSIZE;
+  num_iters += read_bytes % PGSIZE == 0 ? 0 : 1;
+
+  for(i = 0; i < num_iters; i++) {
+      if(s_page_lookup(addr + i * PGSIZE) != NULL) {
+        f->eax = -1;
+        return;
+      }
+  }
+
+  while (read_bytes > 0 || zero_bytes > 0)
+  {
+    // printf("in while of lazy_loading\n");
+    /* Calculate how to fill this page.
+        We will read PAGE_READ_BYTES bytes from FILE
+        and zero the final PAGE_ZERO_BYTES bytes. */
+    page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    page_zero_bytes = PGSIZE - page_read_bytes;
+
+    /* Make a page table entry */
+    pte = (struct s_pte *) malloc (sizeof(struct s_pte));
+    if (pte == NULL) {
+      f->eax = -1;
+      return;
+    }
+
+    pte->tid = t->tid;
+    pte->type = s_pte_type_MMAP;
+    pte->table_number = upage + count * PGSIZE;
+    
+    pte->writable = true;
+    pte->file = t->file_des[fd];
+    pte->upage = upage + count * PGSIZE;
+    pte->file_page;
+    pte->page_offset = ofs;
+    pte->read_bytes = page_read_bytes;
+    pte->zero_bytes = page_zero_bytes;
+    pte->mmap_id = t->mmap_id;
+    pte->swap_slot;
+    
+    //printf("table number: %d\n", pte->table_number);
+    /* Add the page table entry */
+    hash_insert (t->s_page_table, &(pte->elem));
+
+    /* Advance. */
+    count++;
+    read_bytes -= page_read_bytes;
+    zero_bytes -= page_zero_bytes;
+    ofs += page_read_bytes;
+    upage += PGSIZE;
+
+    struct mmap_elem *me = (struct mmap_elem *)malloc(sizeof(struct mmap_elem));
+    me->mmap_id = t->mmap_id;
+    me->pte = pte;
+    list_push_back (&(t->mmap_list), me);
+  }
+
+  f->eax = t->mmap_id;
+  t->mmap_id++;
+
+  return;
+}
+
+void
+sys_munmap(int map_id, struct intr_frame *f)
+{
+  struct list_elem *e;
+  struct thread *t;
+  struct s_pte *pte;
+
+  t = thread_current ();
+
+  for (e = list_begin (&(t->mmap_list)); e != list_end (&(t->mmap_list));
+       e = list_next (e))
+    {
+      struct mmap_elem *me = list_entry (e, struct mmap_elem, elem);
+      if (me->mmap_id == map_id) {
+        
+        pte = me->pte;
+        if (pagedir_is_dirty (t->pagedir, pte->upage)) {
+          //printf("page is dirty!\n");
+          file_write_at (pte->file, pte->upage, pte->read_bytes, pte->page_offset);
+        }
+        s_page_delete(t->s_page_table, &(pte->elem));
+        free(list_remove (e));
+      }
+    }
 }

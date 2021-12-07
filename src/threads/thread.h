@@ -114,6 +114,9 @@ struct thread
     int next_fd;
     struct file *file_des[131];
 
+    int mmap_id;
+    struct list mmap_list;
+
     struct file *run_file;
 
     /* project 3 */
@@ -144,6 +147,14 @@ struct child_elem
    tid_t tid;
    int exit_code;
    struct semaphore wait_sema;
+};
+
+struct mmap_elem
+{
+   struct list_elem elem;
+
+   int mmap_id;
+   struct list *pte;
 };
 
 void thread_init (void);
