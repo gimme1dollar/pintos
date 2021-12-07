@@ -30,7 +30,7 @@ struct s_pte {
     uint32_t zero_bytes;
 
     /* to load from mmap */
-    size_t mmap; // ?
+    int mmap_id;
 
     /* to load from swap-slot */
     size_t swap_slot; // ?
@@ -39,6 +39,7 @@ struct s_pte {
 unsigned s_page_hash (const struct hash_elem *h, void *aux);
 bool s_page_less (const struct hash_elem *a, const struct hash_elem *b, void *aux);
 void s_page_init(struct hash *target_table);
+void s_page_delete(struct hash *target_table, struct hash_elem *he);
 
 void s_page_destroy (struct hash_elem *e, void *aux);
 void s_page_free(struct hash *target_table);
@@ -48,8 +49,8 @@ struct s_pte *grow_stack(void* page);
 struct s_pte *valid_address(void *addr);
 
 bool load_segment_from_file(struct s_pte *entry);
-bool load_segment_from_mmap();
-bool load_segment_from_swap();
+bool load_segment_from_mmap(struct s_pte *entry);
+bool load_segment_from_swap(struct s_pte *entry);
 bool load_segment_stack(struct s_pte *entry);
 
 #endif

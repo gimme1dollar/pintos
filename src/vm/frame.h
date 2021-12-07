@@ -5,7 +5,7 @@
 #include "vm/page.h"
 #include "threads/thread.h"
 
-struct hash frame_table;
+struct hash *frame_table;
 
 struct fte {
     struct hash_elem elem;
@@ -21,7 +21,7 @@ bool frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux
 void frame_init();
 
 void frame_destroy (struct hash_elem *e, void *aux);
-void frame_free(struct hash *target_table);
+void frame_free();
 
 struct fte *frame_lookup(uint8_t *frame_number);
 

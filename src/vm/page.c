@@ -30,6 +30,12 @@ s_page_init(struct hash *target_table)
   hash_init(target_table, s_page_hash, s_page_less, NULL);
 }
 
+void 
+s_page_delete(struct hash *target_table, struct hash_elem *he)
+{
+  free(hash_delete (target_table, he));
+}
+
 void
 s_page_destroy (struct hash_elem *e, void *aux)
 {
@@ -89,7 +95,7 @@ s_page_load(struct s_pte *entry)
         case s_pte_type_FILE:
             return load_segment_from_file(entry);
         case s_pte_type_MMAP:
-            return false;
+            return load_segment_from_mmap(entry);
         case s_pte_type_SWAP:
             return false;
         default:
@@ -130,13 +136,38 @@ load_segment_from_file(struct s_pte *entry)
 }
 
 bool 
-load_segment_from_mmap()
+load_segment_from_mmap(struct s_pte *entry)
 {
-    return false;
+    bool page_install;
+
+    /* Get a frame */
+    void *frame = palloc_get_page (PAL_USER);
+    if (frame == NULL)
+        return false;
+
+    /* Set data to the frame from file */
+    file_seek (entry->file, entry->page_offset);
+    if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
+    {
+        palloc_free_page (frame);
+        return false;
+    }
+    memset (frame + entry->read_bytes, 0, entry->zero_bytes);
+
+    /* Link page and frame */
+    page_install = pagedir_get_page (thread_current()->pagedir, entry->upage) == NULL
+          && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
+    if (!page_install)
+    {
+        palloc_free_page (frame);
+        return false;
+    }
+
+    return true;
 }
 
 bool 
-load_segment_from_swap()
+load_segment_from_swap(struct s_pte *entry)
 {
     return false;
 }
@@ -190,7 +221,7 @@ grow_stack(void* page)
     pte->page_offset;
     pte->read_bytes;
     pte->zero_bytes;
-    pte->mmap;
+    pte->mmap_id;
     pte->swap_slot;
 
     hash_insert(t->s_page_table, &(pte->elem));
