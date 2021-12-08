@@ -176,7 +176,7 @@ page_fault (struct intr_frame *f)
          if (pte == NULL)
          {
             //printf("##### pte == NULL!!!\n");
-            if(fault_addr >= PHYS_BASE - 0x0800000)
+            if(fault_addr >= PHYS_BASE - 0x0800000 && fault_addr >= (f->esp - 0x100))
             {  // grow stack
                //printf("grow stack!\n");
                while(temp_addr < PHYS_BASE) {
