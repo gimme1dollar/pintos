@@ -97,7 +97,7 @@ s_page_load(struct s_pte *entry)
         case s_pte_type_MMAP:
             return load_segment_from_mmap(entry);
         case s_pte_type_SWAP:
-            return false;
+            return load_segment_from_swap(entry);
         default:
             printf("something is wrong in s_pte type\n");
             return false;
