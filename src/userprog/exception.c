@@ -175,8 +175,10 @@ page_fault (struct intr_frame *f)
          
          if (pte == NULL)
          {
+            //printf("##### pte == NULL!!!\n");
             if(fault_addr >= PHYS_BASE - 0x0800000)
             {  // grow stack
+               //printf("grow stack!\n");
                while(temp_addr < PHYS_BASE) {
                   //printf("####### grow stack in fault_handler \n");
                   //printf("with falut_addr %#08X and esp %#08X from user %d\n", temp_addr, f->esp, user);

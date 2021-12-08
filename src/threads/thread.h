@@ -152,9 +152,7 @@ struct mmap_elem
 {
    struct list_elem elem;
 
-   void *upage;
    int mmap_id;
-   struct file *file;
    struct list s_pte_list;
 };
 

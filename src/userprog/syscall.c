@@ -441,13 +441,13 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   struct thread *t;
   struct s_pte* pte;
   struct mmap_elem *me;
+  struct file *file;
   uint32_t read_bytes;
   uint32_t zero_bytes;
   size_t page_read_bytes;
   size_t page_zero_bytes;
   off_t ofs;
   void* upage;
-  int count;
   int i_iter, i_end;
 
   /* file descriptor below is stdio */
@@ -462,19 +462,25 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
     return;
   }
 
-  /* get info from the file */
   t = thread_current ();
+
+  if (t->file_des[fd] == NULL) {
+    f->eax = -1;
+    return;
+  }
+
+  /* get info from the file */
   upage = pg_round_down(addr);
   read_bytes = file_length(t->file_des[fd]); // length of file
   zero_bytes = PGSIZE - (read_bytes % PGSIZE);
   ofs = 0;
-  count = 0;
-  
+
   /* file is of length zero */
   if(read_bytes == 0) {
     f->eax = -1;
     return;
   }
+
 
   /* same address */
   i_end = read_bytes / PGSIZE;
@@ -494,14 +500,8 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   }
   list_init (&me->s_pte_list);
   me->mmap_id = t->next_mmap;
-  me->upage = upage; // useful?
-  me->file = file_reopen(t->file_des[fd]); // reopen file
 
-  if (s_page_lookup (upage))
-  {
-    f->eax = -1;
-    return;
-  }
+  file = file_reopen(t->file_des[fd]); // reopen file
 
   /* make s_pte and insert into mmap_list of thread */
   while (read_bytes > 0 || zero_bytes > 0)
@@ -518,11 +518,11 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
 
     pte->tid = t->tid;
     pte->type = s_pte_type_MMAP;
-    pte->table_number = upage + count * PGSIZE;
+    pte->table_number = upage;
     pte->writable = true;
 
-    pte->file = me->file;
-    pte->upage = upage + count * PGSIZE;
+    pte->file = file;
+    pte->upage = upage;
     pte->file_page;
     pte->page_offset = ofs;
     pte->read_bytes = page_read_bytes;
@@ -540,7 +540,6 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
     //printf("*** in hash_table s_pte mmap_id %d\n", s_page_lookup(pte->upage)->mmap_id);
 
     /* Advance. */
-    count++;
     read_bytes -= page_read_bytes;
     zero_bytes -= page_zero_bytes;
     ofs += page_read_bytes;
