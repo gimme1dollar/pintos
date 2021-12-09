@@ -205,7 +205,7 @@ lock_acquire (struct lock *lock)
       if (lock->holder != NULL) {
           child->parent = lock->holder;
           child->acquiring_target_lock = lock;
-          thread_donate_priority(child, lock);
+          //thread_donate_priority(child, lock);
       }
   }
 
