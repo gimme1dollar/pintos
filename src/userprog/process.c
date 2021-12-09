@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/page.h"
+#include "vm/frame.h"
 #include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
@@ -72,6 +73,7 @@ process_execute (const char *file_name)
   arg->parent = cur;
 
   tid = thread_create (thread_name, PRI_DEFAULT, start_process, arg);
+  //printf("thread created!\n");
 
   if (tid != TID_ERROR)
   {
@@ -134,9 +136,12 @@ start_process (void *arg)
   s_page_init(child->s_page_table);
 
   frame_init ();
+  swap_init ();
 
   /* load */
+  //printf("before load\n");
   success = load (args[0], &if_.eip, &if_.esp);
+  //printf("after load\n");
   parent->is_loaded = success;
 
   if(success)
@@ -277,6 +282,18 @@ process_exit (void)
     file_allow_write (cur->run_file);
     file_close (cur->run_file);
   }
+
+  // if(lock_held_by_current_thread(&syscall_handler_lock))
+  //   lock_release (&syscall_handler_lock);
+
+  // if(lock_held_by_current_thread(&load_lock))
+  //   lock_release (&load_lock);
+
+  // if(lock_held_by_current_thread(&frame_lock))
+  //   lock_release (&frame_lock);
+
+  // if(lock_held_by_current_thread(&swap_lock))
+  //   lock_release (&swap_lock);
   
   //printf("unmap on process exit\n");
   for (iterator = 0; iterator < cur->next_mmap; iterator++) 
@@ -419,7 +436,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
+  //printf("before file open\n");
   file = filesys_open (file_name);
+  //printf("after file open\n");
   if (file == NULL)
     {
       printf ("load: %s: open failed\n", file_name);
@@ -429,6 +448,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   t->run_file = file;
 
   /* Read and verify executable header. */
+  //printf("first file read\n");
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
       || ehdr.e_type != 2
@@ -636,6 +656,8 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct thread *t;
   struct s_pte *pte;
 
+  lock_acquire (&load_lock);
+
   t = thread_current ();
   while (read_bytes > 0 || zero_bytes > 0)
     {
@@ -649,7 +671,10 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Make a page table entry */
       pte = (struct s_pte *) malloc (sizeof(struct s_pte));
       if (pte == NULL)
+      {
+        lock_release (&load_lock);
         return false;
+      }
 
       pte->tid = t->tid;
       pte->type = s_pte_type_FILE;
@@ -678,6 +703,7 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 
   //printf("end of lazy laoding!\n");
+  lock_release (&load_lock);
   return true;
 }
 
@@ -714,6 +740,7 @@ lazy_setup_stack (void **esp)
   bool success = false;
   uint8_t *upage;
 
+  lock_acquire (&load_lock);
   /* Make a s_pte */
   upage = pg_round_down(((uint8_t *) PHYS_BASE) - PGSIZE);
   //printf("######### lazy stack upage %#08X\n", upage);
@@ -732,6 +759,7 @@ lazy_setup_stack (void **esp)
   if (success)
     *esp = PHYS_BASE;
   
+  lock_release (&load_lock);
   return success;
 }
 

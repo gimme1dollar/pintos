@@ -9,8 +9,6 @@
 #include "threads/vaddr.h"
 #include "vm/page.h"
 
-struct lock syscall_handler_lock;
-
 bool
 check_mem (void *addr)
 {
@@ -92,7 +90,7 @@ syscall_handler (struct intr_frame *f)
 
   // read memory
   read_mem (&syscall_number, esp, sizeof(int));
-  //thread_current ()->curr_esp = f->esp;
+  thread_current ()->curr_esp = f->esp;
 
   //printf ("*** system call with syscall_number %d ***\n", syscall_number);
 
@@ -248,6 +246,9 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
   struct thread *cur;
   int i;
 
+  if(lock_held_by_current_thread(&syscall_handler_lock))
+    lock_release (&syscall_handler_lock);
+
   cur = thread_current();
   if (cur->child_elem != NULL)
     cur->child_elem->exit_code = exit_code;
@@ -318,15 +319,22 @@ sys_remove (char *file, struct intr_frame *f)
 void
 sys_open (char *file, struct intr_frame *f)
 {
+  //printf("sysopen\n");
   if(file == NULL)
     sys_exit(-1, NULL);
 
   int fd = thread_current()->next_fd;
+  //printf("before lock acquire\n");
   lock_acquire(&syscall_handler_lock);
+  //printf("after lock acquire\n");
   struct file* open_f = filesys_open(file);
+  //printf("after file open\n");
 
   if(open_f == NULL)
+  {
+    //printf("file is null\n");
     f->eax = -1;
+  }
   else
   {
     thread_current()->file_des[fd] = open_f;
@@ -353,8 +361,9 @@ void
 sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
 {
   int i;
-
-  lock_acquire(&syscall_handler_lock);
+  
+  if(!lock_held_by_current_thread(&syscall_handler_lock))
+    lock_acquire (&syscall_handler_lock);
   if (fd == 0) // stdin
   {
     for(i = 0; i < size; i++)
@@ -369,6 +378,8 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
   {
     if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size)){
       //printf("buffer is not ok %d\n", !check_buffer(buffer, size));
+      if(lock_held_by_current_thread(&syscall_handler_lock))
+        lock_release (&syscall_handler_lock);
       sys_exit(-1, NULL);
     }
 
@@ -376,7 +387,8 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
   }
   else
     f->eax = -1;
-  lock_release(&syscall_handler_lock);
+  if(lock_held_by_current_thread(&syscall_handler_lock))
+    lock_release (&syscall_handler_lock);
 
   return;
 }
@@ -387,7 +399,8 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   if (!check_mem (buffer))
     sys_exit (-1, NULL);
 
-  lock_acquire(&syscall_handler_lock);
+  if(!lock_held_by_current_thread(&syscall_handler_lock))
+    lock_acquire (&syscall_handler_lock);
   if (fd == 1) // stdout
   {
     putbuf(buffer, size);
@@ -395,14 +408,18 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   }
   else if (fd > 2)
   {
-    if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size))
+    if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size)) {
+      if(lock_held_by_current_thread(&syscall_handler_lock))
+        lock_release (&syscall_handler_lock);
       sys_exit(-1, NULL);
+    }
 
     f->eax = file_write(thread_current()->file_des[fd], buffer, size);
   }
   else
     f->eax = -1;
-  lock_release(&syscall_handler_lock);
+  if(lock_held_by_current_thread(&syscall_handler_lock))
+    lock_release (&syscall_handler_lock);
 
   return;
 }
@@ -450,15 +467,19 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   void* upage;
   int i_iter, i_end;
 
+  lock_acquire(&syscall_handler_lock);
+
   /* file descriptor below is stdio */
   if(fd < 2) {
     f->eax = -1;
+    lock_release(&syscall_handler_lock);
     return;
   }
 
   /* addr should not be zero & be algiend */
   if(addr != pg_round_down(addr) || addr == 0) {
     f->eax = -1;
+    lock_release(&syscall_handler_lock);
     return;
   }
 
@@ -466,6 +487,7 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
 
   if (t->file_des[fd] == NULL) {
     f->eax = -1;
+    lock_release(&syscall_handler_lock);
     return;
   }
 
@@ -478,6 +500,7 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   /* file is of length zero */
   if(read_bytes == 0) {
     f->eax = -1;
+    lock_release(&syscall_handler_lock);
     return;
   }
 
@@ -488,6 +511,7 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   for(i_iter = 0; i_iter < i_end; i_iter++) {
       if(s_page_lookup(upage + i_iter * PGSIZE) != NULL) {
         f->eax = -1;
+        lock_release(&syscall_handler_lock);
         return;
       }
   } 
@@ -496,6 +520,7 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   me = (struct mmap_elem *)malloc(sizeof(struct mmap_elem));
   if (me == NULL) {
     f->eax = -1;
+    lock_release(&syscall_handler_lock);
     return;
   }
   list_init (&me->s_pte_list);
@@ -549,6 +574,8 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   list_push_back(&t->mmap_list, &(me->elem));
   f->eax = t->next_mmap;
   t->next_mmap++;
+
+  lock_release(&syscall_handler_lock);
   return;
 }
 
@@ -563,6 +590,7 @@ sys_munmap(int map_id, struct intr_frame *f, bool from_syscall)
   struct s_pte *pte;
   bool me_found;
   
+  lock_acquire(&syscall_handler_lock);
   t = thread_current ();
 
   /* find the target mmap_elem in the mmap_list to get list of s_pte's */
@@ -584,6 +612,7 @@ sys_munmap(int map_id, struct intr_frame *f, bool from_syscall)
 
   if (!me_found) 
   {
+    lock_release(&syscall_handler_lock);
     return;
   }
 
@@ -599,7 +628,7 @@ sys_munmap(int map_id, struct intr_frame *f, bool from_syscall)
           file_write_at (pte->file, pte->upage, pte->read_bytes, pte->page_offset);    
         }
 
-      // delete from page_table
+      /*  delete from page_table */
       //printf("removing e\n");
       e = list_remove (e); // remove s_pte from mmap_list in thread
       s_page_delete (t->s_page_table, &(pte->elem)); // remove s_pte from s_page_table in thread
@@ -607,10 +636,10 @@ sys_munmap(int map_id, struct intr_frame *f, bool from_syscall)
     }
   //printf("removing s_pte in mmap_list over \n");
 
-  // finally remove mmap_list entry from mmap_list in thread
-  //printf("removing me start \n");
+  /* finally remove mmap_list entry from mmap_list in thread */
   list_remove (&me->elem); 
   free(me);
-  //printf("removing me over \n");
+
+  lock_release(&syscall_handler_lock);
   return;
 }

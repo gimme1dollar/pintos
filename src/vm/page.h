@@ -4,6 +4,7 @@
 #include <hash.h>
 #include "threads/thread.h"
 #include "filesys/off_t.h"
+#include "vm/swap.h"
 
 enum s_pte_type
 {
@@ -17,9 +18,11 @@ struct s_pte {
     struct hash_elem elem;
     tid_t tid;
     int type; // { FILE, STACK, ... }
+    int prev_type;
     uint8_t *table_number;
 
     bool writable;
+    bool pinned;
 
     /* to load from file */
     struct file *file;

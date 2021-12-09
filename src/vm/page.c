@@ -1,6 +1,8 @@
 #include "vm/page.h"
+#include "vm/frame.h"
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 /* return key */
 unsigned 
@@ -88,20 +90,40 @@ bool
 s_page_load(struct s_pte *entry) 
 {
     //printf("in s_page_load %d\n", entry->tid);
+    bool success; 
+
+    /* load page with respect to its type */
+    success = false;
     switch (entry->type) 
     {
         case s_pte_type_STACK:
-            return load_segment_stack(entry);
+            //printf("before laod stack!\n");
+            success = load_segment_stack(entry);
+            break;
         case s_pte_type_FILE:
-            return load_segment_from_file(entry);
+            //printf("before laod file!\n");
+            success = load_segment_from_file(entry);
+            break;
         case s_pte_type_MMAP:
-            return load_segment_from_mmap(entry);
+            //printf("before laod mmap!\n");
+            success = load_segment_from_mmap(entry);
+            break;
         case s_pte_type_SWAP:
-            return load_segment_from_swap(entry);
+            //printf("before laod swap!\n");
+            success = load_segment_from_swap(entry);
+            //printf("after laod swap!\n");
+            break;
         default:
             printf("something is wrong in s_pte type\n");
-            return false;
+            success = false;
+            break;
     }
+    if (!success) 
+    {
+        return false;
+    }
+
+    return success;
 }
 
 bool 
@@ -110,17 +132,24 @@ load_segment_from_file(struct s_pte *entry)
     bool page_install;
 
     /* Get a frame */
-    void *frame = palloc_get_page (PAL_USER);
+    void *frame = frame_allocate (entry->upage, PAL_USER);
     if (frame == NULL)
         return false;
 
     /* Set data to the frame from file */
     file_seek (entry->file, entry->page_offset);
+
+    if(!lock_held_by_current_thread(&syscall_handler_lock))
+        lock_acquire (&syscall_handler_lock);
     if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
     {
-        palloc_free_page (frame);
+        frame_deallocate (frame, false);
+        if(lock_held_by_current_thread(&syscall_handler_lock))
+            lock_release (&syscall_handler_lock);
         return false;
     }
+    if(lock_held_by_current_thread(&syscall_handler_lock))
+        lock_release (&syscall_handler_lock);
     memset (frame + entry->read_bytes, 0, entry->zero_bytes);
 
     /* Link page and frame */
@@ -128,7 +157,7 @@ load_segment_from_file(struct s_pte *entry)
           && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
     if (!page_install)
     {
-        palloc_free_page (frame);
+        frame_deallocate (frame, true);
         return false;
     }
 
@@ -141,17 +170,24 @@ load_segment_from_mmap(struct s_pte *entry)
     bool page_install;
 
     /* Get a frame */
-    void *frame = palloc_get_page (PAL_USER);
+    void *frame = frame_allocate (entry->upage, PAL_USER);
     if (frame == NULL)
         return false;
 
     /* Set data to the frame from file */
     file_seek (entry->file, entry->page_offset);
+
+    if(!lock_held_by_current_thread(&syscall_handler_lock))
+        lock_acquire (&syscall_handler_lock);
     if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
     {
-        palloc_free_page (frame);
+        frame_deallocate (frame, false);
+        if(lock_held_by_current_thread(&syscall_handler_lock))
+            lock_release (&syscall_handler_lock);
         return false;
     }
+    if(lock_held_by_current_thread(&syscall_handler_lock))
+        lock_release (&syscall_handler_lock);
     memset (frame + entry->read_bytes, 0, entry->zero_bytes);
 
     /* Link page and frame */
@@ -159,7 +195,7 @@ load_segment_from_mmap(struct s_pte *entry)
           && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
     if (!page_install)
     {
-        palloc_free_page (frame);
+        frame_deallocate (frame, true);
         return false;
     }
 
@@ -169,7 +205,32 @@ load_segment_from_mmap(struct s_pte *entry)
 bool 
 load_segment_from_swap(struct s_pte *entry)
 {
-    return false;
+    bool page_install;
+
+    /* Get a frame */
+    //printf("before frame allocate\n");
+    void *frame = frame_allocate (entry->upage, PAL_USER);
+    if (frame == NULL)
+        return false;
+
+    /* Load the data from swap_disk */
+    //printf("before swap in\n");
+    swap_in (entry->swap_slot, frame);
+    entry->type = entry->prev_type;
+    //printf("after swap in\n");
+
+    /* Link page and frame */
+    //printf("###### entry->upage: %#08X", entry->upage);
+    page_install = pagedir_get_page (thread_current()->pagedir, entry->upage) == NULL
+          && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
+    if (!page_install)
+    {
+        printf("page install fail!\n");
+        frame_deallocate (frame, true);
+        return false;
+    }
+
+    return true;
 }
 
 bool 
@@ -179,7 +240,7 @@ load_segment_stack(struct s_pte *entry)
 
     /* get frame */
     uint8_t *frame;
-    frame = palloc_get_page (PAL_USER | PAL_ZERO);
+    frame = frame_allocate (entry->upage, PAL_USER | PAL_ZERO);
     if (frame == NULL)
         return false;
     
@@ -191,7 +252,7 @@ load_segment_stack(struct s_pte *entry)
           && pagedir_set_page (thread_current()->pagedir, entry->upage, frame, entry->writable);
     if (!page_install)
     {
-        palloc_free_page (frame);
+        frame_deallocate (frame, true);
         return false;
     }
 

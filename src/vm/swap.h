@@ -6,6 +6,7 @@
 
 struct block *swap_disk; // swap disk
 struct list *swap_table; // swap table
+struct lock swap_lock;
 
 struct ste {
     struct list_elem elem;

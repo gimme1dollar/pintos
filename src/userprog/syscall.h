@@ -21,6 +21,8 @@
 #include "threads/vaddr.h"
 #include "vm/page.h"
 
+struct lock syscall_handler_lock;
+
 void syscall_init (void);
 
 bool check_mem (void *addr);

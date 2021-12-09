@@ -156,6 +156,8 @@ struct mmap_elem
    struct list s_pte_list;
 };
 
+struct lock load_lock;
+
 void thread_init (void);
 void thread_start (void);
 

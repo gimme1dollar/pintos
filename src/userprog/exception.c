@@ -125,82 +125,83 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
-  bool error;
-  struct s_pte *pte;
-  struct thread *t;
+   //printf("in page fault\n");
+   bool error;
+   struct s_pte *pte;
+   struct thread *t;
 
-  bool not_present;  /* True: not-present page, false: writing r/o page. */
-  bool write;        /* True: access was write, false: access was read. */
-  bool user;         /* True: access by user, false: access by kernel. */
-  void *fault_addr, *fault_page;  /* Fault address. */
-  void *temp_addr;
+   bool not_present;  /* True: not-present page, false: writing r/o page. */
+   bool write;        /* True: access was write, false: access was read. */
+   bool user;         /* True: access by user, false: access by kernel. */
+   void *fault_addr, *fault_page;  /* Fault address. */
+   void *temp_addr;
 
-  /* Obtain faulting address, the virtual address that was
-     accessed to cause the fault.  It may point to code or to
-     data.  It is not necessarily the address of the instruction
-     that caused the fault (that's f->eip).
-     See [IA32-v2a] "MOV--Move to/from Control Registers" and
-     [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
-     (#PF)". */
-  asm ("movl %%cr2, %0" : "=r" (fault_addr));
+   /* Obtain faulting address, the virtual address that was
+      accessed to cause the fault.  It may point to code or to
+      data.  It is not necessarily the address of the instruction
+      that caused the fault (that's f->eip).
+      See [IA32-v2a] "MOV--Move to/from Control Registers" and
+      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
+      (#PF)". */
+   asm ("movl %%cr2, %0" : "=r" (fault_addr));
 
-  /* Turn interrupts back on (they were only off so that we could
-     be assured of reading CR2 before it changed). */
-  intr_enable ();
-  t = thread_current ();
+   /* Turn interrupts back on (they were only off so that we could
+      be assured of reading CR2 before it changed). */
+   intr_enable ();
+   t = thread_current ();
 
-  /* Count page faults. */
-  page_fault_cnt++;
-  
-  /* Determine cause. */
-  not_present = (f->error_code & PF_P) == 0;
-  write = (f->error_code & PF_W) != 0;
-  user = (f->error_code & PF_U) != 0;
+   /* Count page faults. */
+   page_fault_cnt++;
+   
+   /* Determine cause. */
+   not_present = (f->error_code & PF_P) == 0;
+   write = (f->error_code & PF_W) != 0;
+   user = (f->error_code & PF_U) != 0;
 
-  error = false;
-  temp_addr = fault_addr;
-  fault_page = pg_round_down(fault_addr);
-  //printf("1 with falut_page %#08X and esp %#08X from user %d\n", fault_page, f->esp, user);
+   error = false;
+   temp_addr = fault_addr;
+   fault_page = pg_round_down(fault_addr);
+   //printf("1 with falut_page %#08X and esp %#08X from user %d\n", fault_page, f->esp, user);
 
-  if (!not_present) {
-     sys_exit(-1, NULL);
-  }
-  else {
-      if (is_vm_user_vaddr(fault_addr))
+   if (!not_present) {
+      sys_exit(-1, NULL);
+   }
+
+   if (is_vm_user_vaddr(fault_addr))
+   {
+      //printf("2\n");
+
+      // get page from table
+      pte = s_page_lookup(fault_page);
+      
+      if (pte == NULL)
       {
-         //printf("2\n");
-
-         // get page from table
-         pte = s_page_lookup(fault_page);
-         
-         if (pte == NULL)
-         {
-            //printf("##### pte == NULL!!!\n");
-            if(fault_addr >= PHYS_BASE - 0x0800000 && fault_addr >= (f->esp - 0x100))
-            {  // grow stack
-               //printf("grow stack!\n");
-               while(temp_addr < PHYS_BASE) {
-                  //printf("####### grow stack in fault_handler \n");
-                  //printf("with falut_addr %#08X and esp %#08X from user %d\n", temp_addr, f->esp, user);
-                  pte = grow_stack(pg_round_down(temp_addr));
-                  temp_addr += PGSIZE;
-               }               
-            }
-         } else {
-            //printf("before s_page_load\n");
-            error = !s_page_load(pte);
-            //printf("after s_page_load error %d\n", error);
+         //printf("##### pte == NULL!!!\n");
+         if(fault_addr >= PHYS_BASE - 0x0800000 && fault_addr >= (f->esp - 0x100))
+         {  // grow stack
+            //printf("grow stack!\n");
+            while(temp_addr < PHYS_BASE) {
+               //printf("####### grow stack in fault_handler \n");
+               //printf("with falut_addr %#08X and esp %#08X from user %d\n", temp_addr, f->esp, user);
+               pte = grow_stack(pg_round_down(temp_addr));
+               temp_addr += PGSIZE;
+            }               
          }
-
-         if(pte == NULL) {
-            sys_exit(-1, NULL);
-         }
+      } else {
+         //printf("before page load\n");
+         error = !s_page_load(pte);
+         //printf("after page load\n");
       }
-      else
-      {
+
+      if(pte == NULL) {
+         //printf("pte is null after load\n");
          sys_exit(-1, NULL);
       }
-  }
+   }
+   else
+   {
+      sys_exit(-1, NULL);
+   }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

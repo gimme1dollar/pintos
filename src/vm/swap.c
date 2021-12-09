@@ -1,10 +1,14 @@
 #include "vm/swap.h"
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
+#include "userprog/syscall.h"
 
 void
 swap_init (void)
 {
+    if(swap_table != NULL){
+        return;
+    }
     struct ste *te;
     size_t sectors_per_ste;
     uint32_t entry_id, entry_number;
@@ -21,6 +25,7 @@ swap_init (void)
     sectors_per_ste = PGSIZE / BLOCK_SECTOR_SIZE;
     entry_number = block_size(swap_disk) / sectors_per_ste;
 
+    swap_table = (struct list*)malloc(sizeof(struct list));
     list_init (swap_table);
     
     for(entry_id = 0; entry_id < entry_number; entry_id++)
@@ -31,6 +36,9 @@ swap_init (void)
 
         list_push_back (swap_table, &(te->elem));
     }
+
+    /* init swap_lock */
+    lock_init(&swap_lock);
 
     return;
 }
@@ -80,11 +88,13 @@ swap_in (uint32_t index, void *page)
   uint32_t sector, count; 
   void *addr;
 
-  if (!is_vm_user_vaddr (page))
-  {
-      printf("invalid page in swap_in \n");
-      sys_exit(-1, NULL);
-  }
+  lock_acquire(&swap_lock);
+
+//   if (!is_vm_user_vaddr (page))
+//   {
+//       printf("invalid page in swap_in \n");
+//       sys_exit(-1, NULL);
+//   }
 
   /* find the ste */
   for(ste_elem = list_begin(swap_table); ste_elem != list_end(swap_table);
@@ -100,6 +110,7 @@ swap_in (uint32_t index, void *page)
   if(entry == NULL || entry->is_free == true)
   {
       printf("invalid index\n");
+      lock_release(&swap_lock);
       sys_exit(-1, NULL);
   }
 
@@ -112,22 +123,26 @@ swap_in (uint32_t index, void *page)
   }
 
   entry->is_free = true;
+
+  lock_release(&swap_lock);
   return;
 }
 
 uint32_t 
 swap_out (void *page)
 {
+  //printf("in swap out\n");
   struct list_elem *ste_elem;
   struct ste *entry;
   uint32_t sector, count; 
   void *addr;
 
-  if (!is_vm_user_vaddr (page))
-  {
-      printf("invalid page in swap_in \n");
-      sys_exit(-1, NULL);
-  }
+  lock_acquire(&swap_lock);
+//   if (!is_vm_user_vaddr (page))
+//   {
+//       printf("invalid page in swap_out \n");
+//       sys_exit(-1, NULL);
+//   }
 
   /* find available sector */
   for(ste_elem = list_begin(swap_table); ste_elem != list_end(swap_table);
@@ -140,8 +155,9 @@ swap_out (void *page)
       }
   }
 
-  if(entry == NULL)
+  if(!entry->is_free)
   {
+      lock_release(&swap_lock);
       printf("can't find free swap table entry\n");
       return -1;
   }
@@ -151,9 +167,12 @@ swap_out (void *page)
   {
       sector = entry->ste_id * (PGSIZE / BLOCK_SECTOR_SIZE) + count;
       addr = page + (BLOCK_SECTOR_SIZE * count);
+      //printf("origin addr: %#08X, sector: %d, addr: %#08X\n", page, sector, addr);
       block_write (swap_disk, sector, addr);
   }
 
   entry->is_free = false;
+
+  lock_release(&swap_lock);
   return entry->ste_id;
 }

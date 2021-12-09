@@ -1,5 +1,7 @@
 #include "vm/frame.h"
 #include "threads/palloc.h"
+#include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 /* return key */
 unsigned 
@@ -18,21 +20,25 @@ frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux)
     struct fte *fta, *ftb;
 
     fta = hash_entry(a, struct fte, helem);   
-    ftb = hash_entry(b, struct fte, helem);   
+    ftb = hash_entry(b, struct fte, helem);  
 
     return fta->frame_number < ftb->frame_number;
 }
 
 void 
-frame_init()
+frame_init ()
 {
-    if(frame_table == NULL){
+    if(frame_table != NULL){
         return;
     }
 
     frame_table = (struct hash *) malloc(sizeof(struct hash));
     hash_init(frame_table, frame_hash, frame_less, NULL);
+    lock_init (&frame_lock);
+
+    frame_list = (struct list *)malloc(sizeof(struct list));
     list_init(frame_list);
+    celem = NULL;
 
     return;
 }
@@ -43,22 +49,21 @@ frame_destroy (struct hash_elem *e, void *aux)
     struct fte *entry;
     
     entry = hash_entry(e, struct fte, helem);  
+    list_remove (&(entry->lelem));
+    hash_delete(frame_table, &(entry->helem));
     free(entry);
 
     return;
 }
 
 void 
-frame_free(struct thread *t)
+frame_free ()
 {
     struct fte *entry;
-    /* free entry with having entry->tid == t->tid */
-
 
     /* free frame table if every entry is deleted */ 
     if (hash_empty (frame_table))
     {
-        //list_remove(frame_list);
         hash_destroy(frame_table, frame_destroy);
         
         free(frame_table);
@@ -91,7 +96,6 @@ frame_lookup(uint8_t *frame_number)
     {
         return NULL;
     }
-
     return entry;
 }
 
@@ -103,71 +107,145 @@ frame_allocate(void *upage, enum palloc_flags flag)
   struct fte *entry;
   bool evicted;
 
+  lock_acquire(&frame_lock);
+
   /* get allocation of kpage */
   kpage = palloc_get_page (flag);
   if (kpage == NULL) // palloc fail -> eviction
   {
-    frame_evict();
-
-    kpage = palloc_get_page (flag); // get allocated again
+    kpage = frame_evict(flag); // get allocated again
+    //printf("allocate kage %#08X\n", kpage);
   }
 
   /* make frame table entry */
   entry = (struct fte *)malloc(sizeof(struct fte));
   if(entry == NULL) 
   {
+      lock_release(&frame_lock);
+      printf("entry is NULL\n");
       return NULL;
   }
 
-  entry->t = thread_current ();
   entry->frame_number = kpage;
+  entry->t = thread_current ();
   entry->kpage = kpage;
   entry->upage = upage;
   entry->s_pte = s_page_lookup(upage);
-  entry->bit_not_evict = true; //don't ban with this flag on
-  entry->bit_reference = 0;
   
   /* insert into hash table */
   hash_insert (frame_table, &(entry->helem));
   list_push_back (frame_list, &(entry->lelem));
+
+  lock_release(&frame_lock);
   return kpage;
 }
 
 void
-frame_deallocate()
+frame_deallocate(void *kpage, bool flag)
 {
+    struct fte *entry;
 
+    lock_acquire(&frame_lock);
+
+    entry = frame_lookup (pg_round_down (kpage));
+
+    /* clear page directory */
+    if(flag) pagedir_clear_page (entry->t->pagedir, entry->upage);
+
+    /* clear physical frame */
+    palloc_free_page (entry->frame_number);
+
+    /* destrocy the entry */
+    frame_destroy(&(entry->helem), NULL);
+
+    lock_release(&frame_lock);
+    return;
 }
 
-void
-frame_evict()
+void *
+frame_evict(enum palloc_flags flag)
 {
-  struct fte *target;
-  bool dirty;
+  //printf("in frame_evict\n");
+  void *kpage;
+  struct fte *target, *candidate;
+  struct s_pte *pte;
+  bool dirty, found;
+  int iterator, access_count;
+  uint32_t swap_id;
 
   /* get target via clock algorithm */
-
-  
-  /* clear page mapping */
-  pagedir_clear_page (target->t->pagedir, target->upage);
-
-  /* swap out or free */ 
-  switch (target->s_pte->type)
+  found = false;
+  while(!found)
   {
-        case s_pte_type_STACK:
-            target->s_pte->type = s_pte_type_SWAP;
-            break;
-        case s_pte_type_FILE:
-            target->s_pte->type = s_pte_type_SWAP;
-            break;
-        case s_pte_type_MMAP:
-            free(target->s_pte);
-            break;
-        case s_pte_type_SWAP:
-            break;
-        default:
-            break;
+    candidate = next_fte ();
+    access_count = pagedir_is_accessed(candidate->t->pagedir, candidate->upage);
+    if (access_count != 0 || candidate->s_pte->pinned == true)
+    {
+        pagedir_set_accessed (candidate->t->pagedir, candidate->upage, access_count-1);
+        continue;
+    }
+    else
+    {
+        found = true;
+        target = candidate;
+    }
+  }
+
+  if (target == NULL)
+  {
+      printf("clock algorithm had wrong target\n");
+      sys_exit(-1, NULL);
   }
   
-  return;
+  pte = target->s_pte;
+  if(pte->file != NULL) {
+    if (pagedir_is_dirty(target->t->pagedir, pte->upage))
+    {
+        //printf("dirty pagedir\n");
+        if(!lock_held_by_current_thread(&syscall_handler_lock))
+            lock_acquire (&syscall_handler_lock);
+        file_write_at (pte->file, pte->upage, pte->read_bytes, pte->page_offset);
+        if(lock_held_by_current_thread(&syscall_handler_lock))
+            lock_release (&syscall_handler_lock);
+    }
+  }
+
+  /* swap out */
+  pte->swap_slot = swap_out(target->kpage);
+  pte->prev_type = pte->type;
+  pte->type = s_pte_type_SWAP;
+  
+  /* remove from frame table */
+  lock_acquire (&frame_lock);
+  frame_deallocate(target->kpage, true);
+  lock_release (&frame_lock);
+  
+  /* reallocate new page */
+  kpage = palloc_get_page (flag);
+  return kpage;
+}
+
+struct fte *
+next_fte (void)
+{
+    struct fte *entry;
+
+    if (list_empty (frame_list))
+    {
+        printf("next_clock with empty frame_list\n");
+        sys_exit(-1, NULL);
+    }
+
+    if (celem == NULL || celem == list_back (frame_list) ) 
+    {
+        celem = list_front (frame_list);
+    }
+    else 
+    {
+        celem = list_next (celem);
+    }
+
+    entry = list_entry (celem, struct fte, lelem);
+
+    return entry;
 }
