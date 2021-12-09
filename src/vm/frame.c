@@ -58,20 +58,22 @@ frame_destroy (struct hash_elem *e, void *aux)
 }
 
 void 
-frame_free ()
+frame_free (struct s_pte *pte, bool flag)
 {
-    struct fte *entry;
+    struct list_elem *elem;
+    struct fte *target;
 
-    /* free frame table if every entry is deleted */ 
-    if (hash_empty (frame_table))
-    {
-        hash_destroy(frame_table, frame_destroy);
-        
-        free(frame_table);
-        free(frame_list);
+    for(elem = list_begin(frame_list); elem != list_end(frame_list);
+        elem = list_next (frame_list)) {
+            target = list_entry(elem, struct fte, lelem);
+            if(target->s_pte == pte) {
+                break;
+            }
     }
+    if(flag) palloc_free_page (target->frame_number);
+    
+    frame_destroy(&target->helem, NULL);
 
-    return;
 }
 
 
