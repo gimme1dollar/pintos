@@ -100,6 +100,7 @@ process_execute (const char *file_name)
 static void
 start_process (void *arg)
 {
+  //printf("in start process\n");
   struct thread *parent, *child;
   char *file_name;
 
@@ -282,18 +283,6 @@ process_exit (void)
     file_allow_write (cur->run_file);
     file_close (cur->run_file);
   }
-
-  // if(lock_held_by_current_thread(&syscall_handler_lock))
-  //   lock_release (&syscall_handler_lock);
-
-  // if(lock_held_by_current_thread(&load_lock))
-  //   lock_release (&load_lock);
-
-  // if(lock_held_by_current_thread(&frame_lock))
-  //   lock_release (&frame_lock);
-
-  // if(lock_held_by_current_thread(&swap_lock))
-  //   lock_release (&swap_lock);
   
   //printf("unmap on process exit\n");
   for (iterator = 0; iterator < cur->next_mmap; iterator++) 
@@ -436,15 +425,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
+  lock_acquire(&syscall_handler_lock);
   //printf("before file open\n");
   file = filesys_open (file_name);
   //printf("after file open\n");
   if (file == NULL)
     {
+      lock_release(&syscall_handler_lock);
       printf ("load: %s: open failed\n", file_name);
       goto done;
     }
   file_deny_write(file);
+  lock_release(&syscall_handler_lock);
   t->run_file = file;
 
   /* Read and verify executable header. */
@@ -656,8 +648,7 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct thread *t;
   struct s_pte *pte;
 
-  lock_acquire (&load_lock);
-
+  //lock_acquire (&load_lock);
   t = thread_current ();
   while (read_bytes > 0 || zero_bytes > 0)
     {
@@ -672,7 +663,7 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
       pte = (struct s_pte *) malloc (sizeof(struct s_pte));
       if (pte == NULL)
       {
-        lock_release (&load_lock);
+        //lock_release (&load_lock);
         return false;
       }
 
@@ -703,7 +694,7 @@ lazy_load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 
   //printf("end of lazy laoding!\n");
-  lock_release (&load_lock);
+  //lock_release (&load_lock);
   return true;
 }
 
@@ -740,7 +731,7 @@ lazy_setup_stack (void **esp)
   bool success = false;
   uint8_t *upage;
 
-  lock_acquire (&load_lock);
+  //lock_acquire (&load_lock);
   /* Make a s_pte */
   upage = pg_round_down(((uint8_t *) PHYS_BASE) - PGSIZE);
   //printf("######### lazy stack upage %#08X\n", upage);
@@ -759,7 +750,7 @@ lazy_setup_stack (void **esp)
   if (success)
     *esp = PHYS_BASE;
   
-  lock_release (&load_lock);
+  //lock_release (&load_lock);
   return success;
 }
 

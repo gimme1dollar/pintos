@@ -97,21 +97,21 @@ s_page_load(struct s_pte *entry)
     switch (entry->type) 
     {
         case s_pte_type_STACK:
-            //printf("before laod stack!\n");
+            //printf("before load stack!\n");
             success = load_segment_stack(entry);
             break;
         case s_pte_type_FILE:
-            //printf("before laod file!\n");
+            //printf("before load file!\n");
             success = load_segment_from_file(entry);
             break;
         case s_pte_type_MMAP:
-            //printf("before laod mmap!\n");
+            //printf("before load mmap!\n");
             success = load_segment_from_mmap(entry);
             break;
         case s_pte_type_SWAP:
             //printf("before laod swap!\n");
             success = load_segment_from_swap(entry);
-            //printf("after laod swap!\n");
+            //printf("after load swap!\n");
             break;
         default:
             printf("something is wrong in s_pte type\n");
@@ -139,17 +139,20 @@ load_segment_from_file(struct s_pte *entry)
     /* Set data to the frame from file */
     file_seek (entry->file, entry->page_offset);
 
-    if(!lock_held_by_current_thread(&syscall_handler_lock))
+    if(!lock_held_by_current_thread(&syscall_handler_lock)){
         lock_acquire (&syscall_handler_lock);
+    }
     if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
     {
         frame_deallocate (frame, false);
-        if(lock_held_by_current_thread(&syscall_handler_lock))
+        if(lock_held_by_current_thread(&syscall_handler_lock)) {
             lock_release (&syscall_handler_lock);
+        }
         return false;
     }
-    if(lock_held_by_current_thread(&syscall_handler_lock))
+    if(lock_held_by_current_thread(&syscall_handler_lock)){
         lock_release (&syscall_handler_lock);
+    }
     memset (frame + entry->read_bytes, 0, entry->zero_bytes);
 
     /* Link page and frame */
@@ -177,17 +180,20 @@ load_segment_from_mmap(struct s_pte *entry)
     /* Set data to the frame from file */
     file_seek (entry->file, entry->page_offset);
 
-    if(!lock_held_by_current_thread(&syscall_handler_lock))
+    if(!lock_held_by_current_thread(&syscall_handler_lock)) {
         lock_acquire (&syscall_handler_lock);
+    }
     if (file_read (entry->file, frame, entry->read_bytes) != (int) entry->read_bytes)
     {
         frame_deallocate (frame, false);
-        if(lock_held_by_current_thread(&syscall_handler_lock))
+        if(lock_held_by_current_thread(&syscall_handler_lock)) {
             lock_release (&syscall_handler_lock);
+        }
         return false;
     }
-    if(lock_held_by_current_thread(&syscall_handler_lock))
+    if(lock_held_by_current_thread(&syscall_handler_lock)){
         lock_release (&syscall_handler_lock);
+    }
     memset (frame + entry->read_bytes, 0, entry->zero_bytes);
 
     /* Link page and frame */

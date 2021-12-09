@@ -31,7 +31,6 @@ frame_init ()
     if(frame_table != NULL){
         return;
     }
-
     frame_table = (struct hash *) malloc(sizeof(struct hash));
     hash_init(frame_table, frame_hash, frame_less, NULL);
     lock_init (&frame_lock);
@@ -49,8 +48,10 @@ frame_destroy (struct hash_elem *e, void *aux)
     struct fte *entry;
     
     entry = hash_entry(e, struct fte, helem);  
+    lock_acquire(&frame_lock);
     list_remove (&(entry->lelem));
     hash_delete(frame_table, &(entry->helem));
+    lock_release(&frame_lock);
     free(entry);
 
     return;
@@ -107,8 +108,6 @@ frame_allocate(void *upage, enum palloc_flags flag)
   struct fte *entry;
   bool evicted;
 
-  lock_acquire(&frame_lock);
-
   /* get allocation of kpage */
   kpage = palloc_get_page (flag);
   if (kpage == NULL) // palloc fail -> eviction
@@ -121,7 +120,6 @@ frame_allocate(void *upage, enum palloc_flags flag)
   entry = (struct fte *)malloc(sizeof(struct fte));
   if(entry == NULL) 
   {
-      lock_release(&frame_lock);
       printf("entry is NULL\n");
       return NULL;
   }
@@ -132,6 +130,7 @@ frame_allocate(void *upage, enum palloc_flags flag)
   entry->upage = upage;
   entry->s_pte = s_page_lookup(upage);
   
+  lock_acquire(&frame_lock);
   /* insert into hash table */
   hash_insert (frame_table, &(entry->helem));
   list_push_back (frame_list, &(entry->lelem));
@@ -145,20 +144,14 @@ frame_deallocate(void *kpage, bool flag)
 {
     struct fte *entry;
 
-    lock_acquire(&frame_lock);
-
     entry = frame_lookup (pg_round_down (kpage));
 
-    /* clear page directory */
-    if(flag) pagedir_clear_page (entry->t->pagedir, entry->upage);
-
     /* clear physical frame */
-    palloc_free_page (entry->frame_number);
+    if(flag) palloc_free_page (entry->frame_number);
 
     /* destrocy the entry */
     frame_destroy(&(entry->helem), NULL);
 
-    lock_release(&frame_lock);
     return;
 }
 
@@ -179,7 +172,7 @@ frame_evict(enum palloc_flags flag)
   {
     candidate = next_fte ();
     access_count = pagedir_is_accessed(candidate->t->pagedir, candidate->upage);
-    if (access_count != 0 || candidate->s_pte->pinned == true)
+    if (access_count != 0)
     {
         pagedir_set_accessed (candidate->t->pagedir, candidate->upage, access_count-1);
         continue;
@@ -198,6 +191,8 @@ frame_evict(enum palloc_flags flag)
   }
   
   pte = target->s_pte;
+  pagedir_clear_page (target->t->pagedir, target->upage);
+
   if(pte->file != NULL) {
     if (pagedir_is_dirty(target->t->pagedir, pte->upage))
     {
@@ -216,9 +211,7 @@ frame_evict(enum palloc_flags flag)
   pte->type = s_pte_type_SWAP;
   
   /* remove from frame table */
-  lock_acquire (&frame_lock);
   frame_deallocate(target->kpage, true);
-  lock_release (&frame_lock);
   
   /* reallocate new page */
   kpage = palloc_get_page (flag);
@@ -229,9 +222,10 @@ struct fte *
 next_fte (void)
 {
     struct fte *entry;
-
+    lock_acquire(&frame_lock);
     if (list_empty (frame_list))
     {
+        lock_release(&frame_lock);
         printf("next_clock with empty frame_list\n");
         sys_exit(-1, NULL);
     }
@@ -246,6 +240,7 @@ next_fte (void)
     }
 
     entry = list_entry (celem, struct fte, lelem);
+    lock_release(&frame_lock);
 
     return entry;
 }

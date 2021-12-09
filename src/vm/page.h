@@ -22,7 +22,6 @@ struct s_pte {
     uint8_t *table_number;
 
     bool writable;
-    bool pinned;
 
     /* to load from file */
     struct file *file;

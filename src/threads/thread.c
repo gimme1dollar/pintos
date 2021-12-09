@@ -845,7 +845,7 @@ reschedule (void)
   struct thread *cur = thread_current ();
   struct thread *can = list_entry( list_front(&ready_list), struct thread, elem );
   enum intr_level old_level;
-
+  
   old_level = intr_disable ();
   if (cur != idle_thread && can->priority > cur->priority)
   {

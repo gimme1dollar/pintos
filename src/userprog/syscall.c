@@ -246,8 +246,9 @@ sys_exit (int exit_code, struct intr_frame *f UNUSED)
   struct thread *cur;
   int i;
 
-  if(lock_held_by_current_thread(&syscall_handler_lock))
+  if(lock_held_by_current_thread(&syscall_handler_lock)){
     lock_release (&syscall_handler_lock);
+  }
 
   cur = thread_current();
   if (cur->child_elem != NULL)
@@ -296,7 +297,7 @@ sys_create (char *file, size_t size, struct intr_frame *f)
   if(file == NULL)
     sys_exit(-1, NULL);
 
-  lock_acquire(&syscall_handler_lock);
+  lock_acquire (&syscall_handler_lock);
   f->eax = filesys_create(file, size);
   lock_release(&syscall_handler_lock);
 
@@ -309,7 +310,7 @@ sys_remove (char *file, struct intr_frame *f)
   if(file == NULL)
     sys_exit(-1, NULL);
 
-  lock_acquire(&syscall_handler_lock);
+  lock_acquire (&syscall_handler_lock);
   f->eax = filesys_remove(file);
   lock_release(&syscall_handler_lock);
 
@@ -325,7 +326,7 @@ sys_open (char *file, struct intr_frame *f)
 
   int fd = thread_current()->next_fd;
   //printf("before lock acquire\n");
-  lock_acquire(&syscall_handler_lock);
+  lock_acquire (&syscall_handler_lock);
   //printf("after lock acquire\n");
   struct file* open_f = filesys_open(file);
   //printf("after file open\n");
@@ -362,8 +363,9 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
 {
   int i;
   
-  if(!lock_held_by_current_thread(&syscall_handler_lock))
+  if(!lock_held_by_current_thread(&syscall_handler_lock)){
     lock_acquire (&syscall_handler_lock);
+  }
   if (fd == 0) // stdin
   {
     for(i = 0; i < size; i++)
@@ -378,8 +380,9 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
   {
     if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size)){
       //printf("buffer is not ok %d\n", !check_buffer(buffer, size));
-      if(lock_held_by_current_thread(&syscall_handler_lock))
+      if(lock_held_by_current_thread(&syscall_handler_lock)){
         lock_release (&syscall_handler_lock);
+      }
       sys_exit(-1, NULL);
     }
 
@@ -387,8 +390,9 @@ sys_read (int fd, void *buffer, unsigned size, struct intr_frame *f)
   }
   else
     f->eax = -1;
-  if(lock_held_by_current_thread(&syscall_handler_lock))
+  if(lock_held_by_current_thread(&syscall_handler_lock)){
     lock_release (&syscall_handler_lock);
+  }
 
   return;
 }
@@ -399,8 +403,9 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   if (!check_mem (buffer))
     sys_exit (-1, NULL);
 
-  if(!lock_held_by_current_thread(&syscall_handler_lock))
+  if(!lock_held_by_current_thread(&syscall_handler_lock)){
     lock_acquire (&syscall_handler_lock);
+  }
   if (fd == 1) // stdout
   {
     putbuf(buffer, size);
@@ -409,8 +414,9 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   else if (fd > 2)
   {
     if(thread_current()->file_des[fd] == NULL || !check_buffer(buffer, size)) {
-      if(lock_held_by_current_thread(&syscall_handler_lock))
+      if(lock_held_by_current_thread(&syscall_handler_lock)){
         lock_release (&syscall_handler_lock);
+      }
       sys_exit(-1, NULL);
     }
 
@@ -418,8 +424,9 @@ sys_write (int fd, void *buffer, unsigned size, struct intr_frame *f)
   }
   else
     f->eax = -1;
-  if(lock_held_by_current_thread(&syscall_handler_lock))
+  if(lock_held_by_current_thread(&syscall_handler_lock)){
     lock_release (&syscall_handler_lock);
+  }
 
   return;
 }
@@ -467,7 +474,7 @@ sys_mmap(int fd, void* addr, struct intr_frame *f)
   void* upage;
   int i_iter, i_end;
 
-  lock_acquire(&syscall_handler_lock);
+  lock_acquire (&syscall_handler_lock);
 
   /* file descriptor below is stdio */
   if(fd < 2) {
@@ -590,7 +597,7 @@ sys_munmap(int map_id, struct intr_frame *f, bool from_syscall)
   struct s_pte *pte;
   bool me_found;
   
-  lock_acquire(&syscall_handler_lock);
+  lock_acquire (&syscall_handler_lock);
   t = thread_current ();
 
   /* find the target mmap_elem in the mmap_list to get list of s_pte's */

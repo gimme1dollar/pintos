@@ -64,9 +64,10 @@ void
 swap_free (void)
 {
     struct list_elem *ste_elem;
-
+    lock_acquire(&swap_lock);
     /* free swap_disk */
     free (swap_disk);
+    lock_release(&swap_lock);
 
     /* free swap_table */
     for(ste_elem = list_begin(swap_table); ste_elem != list_end(swap_table);
@@ -88,14 +89,6 @@ swap_in (uint32_t index, void *page)
   uint32_t sector, count; 
   void *addr;
 
-  lock_acquire(&swap_lock);
-
-//   if (!is_vm_user_vaddr (page))
-//   {
-//       printf("invalid page in swap_in \n");
-//       sys_exit(-1, NULL);
-//   }
-
   /* find the ste */
   for(ste_elem = list_begin(swap_table); ste_elem != list_end(swap_table);
       ste_elem = list_next (ste_elem))
@@ -110,10 +103,10 @@ swap_in (uint32_t index, void *page)
   if(entry == NULL || entry->is_free == true)
   {
       printf("invalid index\n");
-      lock_release(&swap_lock);
       sys_exit(-1, NULL);
   }
 
+  lock_acquire(&swap_lock);
   /* read from swap_disk */
   for (count = 0; count < (PGSIZE / BLOCK_SECTOR_SIZE); count++) 
   {
@@ -136,14 +129,7 @@ swap_out (void *page)
   struct ste *entry;
   uint32_t sector, count; 
   void *addr;
-
-  lock_acquire(&swap_lock);
-//   if (!is_vm_user_vaddr (page))
-//   {
-//       printf("invalid page in swap_out \n");
-//       sys_exit(-1, NULL);
-//   }
-
+  
   /* find available sector */
   for(ste_elem = list_begin(swap_table); ste_elem != list_end(swap_table);
       ste_elem = list_next (ste_elem))
@@ -157,11 +143,11 @@ swap_out (void *page)
 
   if(!entry->is_free)
   {
-      lock_release(&swap_lock);
       printf("can't find free swap table entry\n");
       return -1;
   }
 
+  lock_acquire(&swap_lock);
   /* write to swap_disk */
   for (count = 0; count < (PGSIZE / BLOCK_SECTOR_SIZE); count++) 
   {
